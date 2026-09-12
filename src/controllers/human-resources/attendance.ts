@@ -1,207 +1,167 @@
-import type { NextFunction, Request, Response } from "express";
+import type { Request, Response } from "express";
+import {
+  deleteRow,
+  getRowById,
+  insertRow,
+  listRows,
+  newId,
+  updateRow,
+} from "../../models/front-office/base.js";
 import { hrTables } from "../../models/human-resources/index.js";
-import { listRows, insertRow, updateRow, getRowById } from "../../models/base.js";
+import { fail, fromError, ok } from "../../utils/response.js";
 
-function toIsoTimestamp(timeStr?: string, dateStr?: string): string {
-  if (!timeStr) return new Date().toISOString();
-  if (timeStr.includes("T") && !isNaN(Date.parse(timeStr))) return new Date(timeStr).toISOString();
-  const baseDate = dateStr || new Date().toISOString().slice(0, 10);
-  const parsed = Date.parse(`${baseDate} ${timeStr}`);
-  if (!isNaN(parsed)) return new Date(parsed).toISOString();
-  return new Date().toISOString();
+function todayIso(): string {
+  return new Date().toLocaleDateString("en-CA");
 }
 
-function calculateHours(punchIn?: string | null, punchOut?: string | null): number {
-  if (!punchIn || !punchOut) return 0;
+export async function listAttendance(req: Request, res: Response) {
   try {
-    const inTime = new Date(punchIn.includes("T") ? punchIn : `1970-01-01T${punchIn}`);
-    const outTime = new Date(punchOut.includes("T") ? punchOut : `1970-01-01T${punchOut}`);
-    const diffMs = outTime.getTime() - inTime.getTime();
-    if (diffMs <= 0) return 0;
-    const hours = diffMs / (1000 * 60 * 60);
-    return Math.round(hours * 100) / 100;
-  } catch {
-    return 0;
+    const filters: Record<string, string | undefined> = {};
+    if (req.query.employeeId) filters.employee_id = String(req.query.employeeId);
+    if (req.query.date) filters.record_date = String(req.query.date);
+    if (req.query.status && req.query.status !== "ALL") filters.status = String(req.query.status);
+
+    const rows = await listRows(hrTables.attendanceRecords, {
+      filters,
+      orderBy: "record_date",
+    }).catch(() => []);
+
+    return ok(res, rows);
+  } catch (e) {
+    return fromError(res, e);
   }
 }
 
-export async function getEmployeeAttendance(req: Request, res: Response, next: NextFunction) {
+export async function getDailyAttendance(req: Request, res: Response) {
   try {
-    const employeeId = String(req.params.employeeId);
-    const { fromDate, toDate, limit } = req.query || {};
+    const date = String(req.query.date || todayIso()).slice(0, 10);
+    const rows = await listRows(hrTables.attendanceRecords, {
+      filters: { record_date: date },
+      orderBy: "created_at",
+    }).catch(() => []);
 
-    const rows = await listRows<any>(hrTables.attendanceRecords, {
+    return ok(res, rows);
+  } catch (e) {
+    return fromError(res, e);
+  }
+}
+
+export async function getEmployeeAttendance(req: Request, res: Response) {
+  try {
+    const employeeId = String(req.params.id);
+    const rows = await listRows(hrTables.attendanceRecords, {
       filters: { employee_id: employeeId },
-      orderBy: "attendance_date",
-      ascending: false,
-      limit: limit ? Number(limit) : 100,
-    });
+      orderBy: "record_date",
+    }).catch(() => []);
 
-    let filtered = rows;
-    if (fromDate) {
-      filtered = filtered.filter((r) => (r.attendanceDate || r.recordDate) >= String(fromDate));
-    }
-    if (toDate) {
-      filtered = filtered.filter((r) => (r.attendanceDate || r.recordDate) <= String(toDate));
-    }
-
-    res.json({ success: true, data: filtered });
-  } catch (err) {
-    next(err);
+    return ok(res, rows);
+  } catch (e) {
+    return fromError(res, e);
   }
 }
 
-export async function punchIn(req: Request, res: Response, next: NextFunction) {
+export async function punchIn(req: Request, res: Response) {
   try {
-    const {
-      employeeId,
-      attendanceDate = new Date().toISOString().slice(0, 10),
-      punchInAt,
-      inLocation,
-      deviceType = "WEB",
-      shiftId,
-      remarks,
-    } = req.body || {};
+    const body = req.body as Record<string, unknown>;
+    const employeeId = String(body.employeeId || body.employee_id || "");
+    if (!employeeId) return fail(res, "employeeId is required", 400);
 
-    if (!employeeId) {
-      return res.status(400).json({ success: false, error: "employeeId is required" });
+    const date = String(body.attendanceDate || body.record_date || todayIso()).slice(0, 10);
+    const timeStr = String(
+      body.punchInAt ||
+        body.checkIn ||
+        new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }),
+    );
+
+    // Check if record exists for this employee on this date
+    const existing = await listRows(hrTables.attendanceRecords, {
+      filters: { employee_id: employeeId, record_date: date },
+    }).catch(() => []);
+
+    if (existing.length > 0) {
+      const record = existing[0] as Record<string, unknown>;
+      const updated = await updateRow(
+        hrTables.attendanceRecords,
+        String(record.id),
+        {
+          check_in: timeStr,
+          status: body.status || "Present",
+          manual_reason: body.remarks || body.manualReason || record.manual_reason,
+          is_manual_entry: true,
+          updated_at: new Date().toISOString(),
+        },
+      );
+      return ok(res, updated);
     }
 
-    const isoPunchIn = toIsoTimestamp(punchInAt, attendanceDate);
-
-    const existing = await listRows<any>(hrTables.attendanceRecords, {
-      filters: {
-        employee_id: employeeId,
-        attendance_date: attendanceDate,
-      },
-      limit: 1,
+    const newRecord = await insertRow(hrTables.attendanceRecords, {
+      id: newId("HRA"),
+      employee_id: employeeId,
+      record_date: date,
+      check_in: timeStr,
+      check_out: "-",
+      worked_hours: 0,
+      expected_hours: 8,
+      status: body.status || "Present",
+      is_manual_entry: true,
+      manual_reason: body.remarks || body.manualReason || "",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
 
-    let result;
-    if (existing && existing.length > 0) {
-      const rec = existing[0];
-      result = await updateRow(hrTables.attendanceRecords, rec.id, {
-        punchIn: isoPunchIn,
-        inLocation,
-        deviceType,
-        attendanceStatus: "PRESENT",
-        remarks: remarks || rec.remarks,
-      });
-    } else {
-      result = await insertRow(hrTables.attendanceRecords, {
-        employeeId,
-        attendanceDate,
-        punchIn: isoPunchIn,
-        inLocation,
-        deviceType,
-        shiftId,
-        dayType: "WORKING_DAY",
-        attendanceStatus: "PRESENT",
-        workedHours: 0,
-        remarks,
-      });
-    }
-
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
+    return ok(res, newRecord, 201);
+  } catch (e) {
+    return fromError(res, e);
   }
 }
 
-export async function punchOut(req: Request, res: Response, next: NextFunction) {
+export async function punchOut(req: Request, res: Response) {
   try {
-    const {
-      employeeId,
-      attendanceDate = new Date().toISOString().slice(0, 10),
-      punchOutAt,
-      outLocation,
-      remarks,
-    } = req.body || {};
+    const body = req.body as Record<string, unknown>;
+    const employeeId = String(body.employeeId || body.employee_id || "");
+    if (!employeeId) return fail(res, "employeeId is required", 400);
 
-    if (!employeeId) {
-      return res.status(400).json({ success: false, error: "employeeId is required" });
+    const date = String(body.attendanceDate || body.record_date || todayIso()).slice(0, 10);
+    const timeStr = String(
+      body.punchOutAt ||
+        body.checkOut ||
+        new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }),
+    );
+
+    const existing = await listRows(hrTables.attendanceRecords, {
+      filters: { employee_id: employeeId, record_date: date },
+    }).catch(() => []);
+
+    if (existing.length > 0) {
+      const record = existing[0] as Record<string, unknown>;
+      const updated = await updateRow(
+        hrTables.attendanceRecords,
+        String(record.id),
+        {
+          check_out: timeStr,
+          worked_hours: Number(body.workedHours ?? 8),
+          updated_at: new Date().toISOString(),
+        },
+      );
+      return ok(res, updated);
     }
 
-    const isoPunchOut = toIsoTimestamp(punchOutAt, attendanceDate);
-
-    const existing = await listRows<any>(hrTables.attendanceRecords, {
-      filters: {
-        employee_id: employeeId,
-        attendance_date: attendanceDate,
-      },
-      limit: 1,
+    const newRecord = await insertRow(hrTables.attendanceRecords, {
+      id: newId("HRA"),
+      employee_id: employeeId,
+      record_date: date,
+      check_in: "09:00 AM",
+      check_out: timeStr,
+      worked_hours: Number(body.workedHours ?? 8),
+      expected_hours: 8,
+      status: "Present",
+      is_manual_entry: true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     });
 
-    if (!existing || existing.length === 0) {
-      return res.status(404).json({ success: false, error: "No attendance record found to punch out from" });
-    }
-
-    const rec = existing[0];
-    const workedHours = calculateHours(rec.punchIn, isoPunchOut);
-
-    const result = await updateRow(hrTables.attendanceRecords, rec.id, {
-      punchOut: isoPunchOut,
-      outLocation,
-      workedHours: workedHours > 0 ? workedHours : (rec.workedHours || 8),
-      attendanceStatus: "PRESENT",
-      remarks: remarks || rec.remarks,
-    });
-
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function correctAttendance(req: Request, res: Response, next: NextFunction) {
-  try {
-    const id = String(req.params.id);
-    const {
-      punchIn,
-      punchOut,
-      attendanceStatus = "PRESENT",
-      manualReason,
-      editedBy = "HR Admin",
-    } = req.body || {};
-
-    const rec = await getRowById<any>(hrTables.attendanceRecords, id);
-    if (!rec) {
-      return res.status(404).json({ success: false, error: "Attendance record not found" });
-    }
-
-    const isoPunchIn = punchIn ? toIsoTimestamp(punchIn, rec.attendanceDate) : rec.punchIn;
-    const isoPunchOut = punchOut ? toIsoTimestamp(punchOut, rec.attendanceDate) : rec.punchOut;
-    const workedHours = calculateHours(isoPunchIn, isoPunchOut);
-
-    const result = await updateRow(hrTables.attendanceRecords, id, {
-      punchIn: isoPunchIn,
-      punchOut: isoPunchOut,
-      workedHours: workedHours > 0 ? workedHours : (rec.workedHours || 8),
-      attendanceStatus,
-      isManualEntry: true,
-      manualReason,
-      editedBy,
-      editedOn: new Date().toISOString(),
-    });
-
-    res.json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function processAbsence(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { attendanceDate = new Date().toISOString().slice(0, 10) } = req.body || {};
-    res.json({
-      success: true,
-      data: {
-        attendanceDate,
-        processed: true,
-        message: "Absence processing completed successfully",
-      },
-    });
-  } catch (err) {
-    next(err);
+    return ok(res, newRecord, 201);
+  } catch (e) {
+    return fromError(res, e);
   }
 }

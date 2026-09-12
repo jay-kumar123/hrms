@@ -4,12 +4,12 @@ import { requireProperty } from "../middleware/property.js";
 import { attachRequestContext } from "../middleware/request-context.js";
 import { createTableCrud, mountCrud } from "../controllers/shared-crud.js";
 import { hrTables } from "../models/human-resources/index.js";
-import { listRows } from "../models/base.js";
 import { getDashboard } from "../controllers/human-resources/dashboard.js";
 import * as employees from "../controllers/human-resources/employees.js";
 import * as payroll from "../controllers/human-resources/payroll.js";
 import * as attendance from "../controllers/human-resources/attendance.js";
-import * as leaves from "../controllers/human-resources/leaves.js";
+import * as leaveApplications from "../controllers/human-resources/leave-applications.js";
+import * as weeklyOffs from "../controllers/human-resources/weekly-offs.js";
 
 const router = Router();
 
@@ -27,6 +27,13 @@ router.put("/employees/:id", employees.updateEmployee);
 router.patch("/employees/:id", employees.updateEmployee);
 router.delete("/employees/:id", employees.deleteEmployee);
 
+// Leave applications ops
+router.post("/leave-applications/preview-days", leaveApplications.previewLeaveDays);
+router.post("/leave-applications/:id/approve", leaveApplications.approveLeaveApplication);
+router.post("/leave-applications/:id/reject", leaveApplications.rejectLeaveApplication);
+router.post("/leave-applications/:id/cancel", leaveApplications.cancelLeaveApplication);
+router.post("/leave-applications/:id/modify", leaveApplications.modifyLeaveApplication);
+
 // Payroll ops
 router.get("/payroll/audit-logs", payroll.listAuditLogs);
 router.get("/payroll/records", payroll.listPayrollRecords);
@@ -36,56 +43,79 @@ router.put("/payroll/records/:id", payroll.updatePayrollRecord);
 router.patch("/payroll/records/:id", payroll.updatePayrollRecord);
 router.post("/payroll/records/:id/approve", payroll.approvePayrollRecord);
 router.post("/payroll/records/:id/payments", payroll.recordSalaryPayment);
-// Attendance Daily Helper Route
 
-// Attendance Ops
-
-// Leave Ops
-
-// Safe Holiday Attendance Route (Gracefully handles missing table)
-router.get("/holiday-attendance", async (_req, res) => {
-  try {
-    const rows = await listRows(hrTables.attendanceRecords, {
-      filters: { holiday_worked: true },
-      orderBy: "attendance_date",
-    });
-    res.json({ success: true, data: rows || [] });
-  } catch {
-    res.json({ success: true, data: [] });
-  }
-});
-
-router.post("/leave-applications", leaves.createLeaveApplication);
-router.post("/leave-applications/preview-days", leaves.previewLeaveDays);
-router.post("/leave-applications/:id/approve", leaves.approveLeave);
-router.post("/leave-applications/:id/cancel", leaves.cancelLeave);
-router.post("/leave-applications/:id/modify", leaves.modifyLeave);
-
-router.get("/attendance/employee/:employeeId", attendance.getEmployeeAttendance);
+// Attendance ops
+router.get("/attendance/daily", attendance.getDailyAttendance);
+router.get("/attendance/employee/:id", attendance.getEmployeeAttendance);
 router.post("/attendance/punch-in", attendance.punchIn);
 router.post("/attendance/punch-out", attendance.punchOut);
-router.post("/attendance/process-absence", attendance.processAbsence);
-router.post("/attendance/:id/correct", attendance.correctAttendance);
-router.post("/attendance/:id/recalculate", attendance.correctAttendance);
 
-router.get("/attendance/daily", async (req, res, next) => {
-  try {
-    const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
-    const rows = await listRows(hrTables.attendanceRecords, {
-      filters: { attendance_date: date },
-      orderBy: "attendance_date",
-    });
-    res.json({ success: true, data: rows });
-  } catch (err) {
-    next(err);
-  }
-});
+// Weekly offs ops
+router.get("/weekly-offs/staffing-preview", weeklyOffs.staffingPreview);
 
-
-// Masters & operational CRUD
-const crudRoutes: { path: string; table: string; prefix: string; orderBy?: string }[] = [
-  { path: "/masters/departments", table: hrTables.departments, prefix: "HRD", orderBy: "dept_code" },
-  { path: "/masters/designations", table: hrTables.designations, prefix: "HRDS", orderBy: "designation_code" },
+const crudRoutes: {
+  path: string;
+  table: string;
+  prefix: string;
+  orderBy?: string;
+  mapIncoming?: (body: Record<string, unknown>, ctx?: { isCreate: boolean }) => Record<string, unknown>;
+}[] = [
+  {
+    path: "/masters/departments",
+    table: hrTables.departments,
+    prefix: "HRD",
+    orderBy: "dept_code",
+    mapIncoming: (body: Record<string, unknown>, ctx?: { isCreate: boolean }) => {
+      const name = String(
+        body.departmentName ||
+          body.department_name ||
+          body.deptName ||
+          body.dept_name ||
+          body.name ||
+          "",
+      ).trim();
+      if (name) {
+        body.departmentName = name;
+        body.department_name = name;
+        body.deptName = name;
+        body.name = name;
+      }
+      if (ctx?.isCreate && !body.deptCode && !body.dept_code) {
+        const rand = Math.floor(100 + Math.random() * 900);
+        body.deptCode = `DPT-${rand}`;
+      }
+      return body;
+    },
+  },
+  {
+    path: "/masters/designations",
+    table: hrTables.designations,
+    prefix: "HRDS",
+    orderBy: "designation_code",
+    mapIncoming: (body: Record<string, unknown>, ctx?: { isCreate: boolean }) => {
+      const title = String(
+        body.designationTitle ||
+          body.designation_title ||
+          body.designationName ||
+          body.designation_name ||
+          body.name ||
+          body.title ||
+          "",
+      ).trim();
+      if (title) {
+        body.designationName = title;
+        body.designation_name = title;
+        body.designationTitle = title;
+        body.designation_title = title;
+        body.name = title;
+      }
+      if (ctx?.isCreate && !body.designationCode && !body.designation_code) {
+        const rand = Math.floor(100 + Math.random() * 900);
+        body.designationCode = `DSG-${rand}`;
+      }
+      return body;
+    },
+  },
   { path: "/masters/employment-types", table: hrTables.employmentTypes, prefix: "HRET", orderBy: "type_code" },
   { path: "/masters/shift-types", table: hrTables.shiftTypes, prefix: "HRST", orderBy: "shift_code" },
   { path: "/masters/leave-types", table: hrTables.leaveTypes, prefix: "HRLT", orderBy: "leave_code" },
@@ -94,7 +124,7 @@ const crudRoutes: { path: string; table: string; prefix: string; orderBy?: strin
   { path: "/masters/salary-components", table: hrTables.salaryComponents, prefix: "HRSC", orderBy: "code" },
   { path: "/masters/document-categories", table: hrTables.documentCategories, prefix: "HRDC", orderBy: "name" },
   { path: "/masters/document-types", table: hrTables.documentTypes, prefix: "HRDT", orderBy: "name" },
-  { path: "/attendance", table: hrTables.attendanceRecords, prefix: "HRA", orderBy: "attendance_date" },
+  { path: "/attendance", table: hrTables.attendanceRecords, prefix: "HRA", orderBy: "record_date" },
   { path: "/shift-assignments", table: hrTables.shiftAssignments, prefix: "HRSA", orderBy: "effective_from" },
   { path: "/weekly-offs", table: hrTables.weeklyOffs, prefix: "HRWO", orderBy: "effective_from" },
   { path: "/leave-applications", table: hrTables.leaveApplications, prefix: "HRLA", orderBy: "applied_on" },
@@ -104,9 +134,42 @@ const crudRoutes: { path: string; table: string; prefix: string; orderBy?: strin
   { path: "/salary-payments", table: hrTables.salaryPayments, prefix: "HRSP", orderBy: "payment_date" },
   { path: "/payslips", table: hrTables.payslips, prefix: "HRPS", orderBy: "generated_date" },
   { path: "/complaint-categories", table: hrTables.complaintCategories, prefix: "HRCC", orderBy: "category_name" },
-  { path: "/complaints", table: hrTables.complaints, prefix: "HRC", orderBy: "submitted_date" },
+  {
+    path: "/complaints",
+    table: hrTables.complaints,
+    prefix: "HRC",
+    orderBy: "submitted_date",
+    mapIncoming: (body: Record<string, unknown>, ctx?: { isCreate: boolean }) => {
+      const hasEmpId = "employeeId" in body || "employee_id" in body;
+      if (hasEmpId) {
+        const raw = body.employeeId !== undefined ? body.employeeId : body.employee_id;
+        const empId = raw !== null && raw !== undefined ? String(raw).trim() : "";
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(empId);
+        if (!isUuid || body.isAnonymous || body.is_anonymous) {
+          body.employeeId = null;
+          body.employee_id = null;
+        }
+      } else if (ctx?.isCreate) {
+        body.employeeId = null;
+        body.employee_id = null;
+      }
+      if (ctx?.isCreate) {
+        if (!body.ticketNo && !body.ticket_no) {
+          const rand = Math.floor(1000 + Math.random() * 9000);
+          const year = new Date().getFullYear();
+          body.ticketNo = `TCK-${year}-${rand}`;
+        }
+        if (!body.submittedDate && !body.submitted_date) {
+          body.submittedDate = new Date().toISOString();
+        }
+        if (!body.status) {
+          body.status = "Open";
+        }
+      }
+      return body;
+    },
+  },
   { path: "/approval-workflows", table: hrTables.approvalWorkflows, prefix: "HRAW", orderBy: "code" },
-  { path: "/tax/rules", table: hrTables.taxRules, prefix: "HRTX", orderBy: "tax_code" },
 ];
 
 for (const cfg of crudRoutes) {
@@ -117,6 +180,7 @@ for (const cfg of crudRoutes) {
       table: cfg.table,
       idPrefix: cfg.prefix,
       orderBy: cfg.orderBy,
+      mapIncoming: cfg.mapIncoming,
     }),
   );
 }

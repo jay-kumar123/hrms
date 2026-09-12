@@ -7,7 +7,7 @@ import {
   newId,
   updateRow,
   type FilterMap,
-} from "../base.js";
+} from "../front-office/base.js";
 
 export const hrTables = {
   departments: "hr_departments",

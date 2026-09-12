@@ -1,14 +1,11 @@
-import type { NextFunction, Request, Response } from "express";
+﻿import type { NextFunction, Request, Response } from "express";
 
-/** Map URL prefix → short module label for terminal logs. */
+/** Map URL prefix -> short module label for terminal logs. */
 function moduleTag(url: string): string {
-  if (url.startsWith("/api/housekeeping")) return "HK";
-  if (url.startsWith("/api/purchase-stores")) return "PS";
   if (url.startsWith("/api/human-resources")) return "HR";
-  if (url.startsWith("/api/food-beverages")) return "FB";
-  if (url.startsWith("/api/front-office")) return "FO";
   if (url.startsWith("/api/auth")) return "AUTH";
-  return "API";
+  if (url.startsWith("/api/platform")) return "PLATFORM";
+  return "HRMS";
 }
 
 /** Dev request logger — prints each API hit to the terminal. */
@@ -31,7 +28,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
     });
 
     console.log(
-      `${time} ${dim}[${tag}]${reset} ${color}${method.padEnd(7)}${reset} ${originalUrl} → ${color}${status}${reset} (${ms}ms)`,
+      `${time} ${dim}[${tag}]${reset} ${color}${method.padEnd(7)}${reset} ${originalUrl} -> ${color}${status}${reset} (${ms}ms)`,
     );
   });
 

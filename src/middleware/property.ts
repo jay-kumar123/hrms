@@ -1,15 +1,40 @@
-import type { NextFunction, Request, Response } from "express";
+import type { NextFunction, Response } from "express";
+import { AppError, PermissionError, UnauthorizedError } from "../errors/index.js";
+import { PropertyService } from "../services/platform/property.service.js";
+import type { ContextRequest } from "./request-context.js";
 
 export function requireProperty(
-  req: Request,
-  _res: Response,
+  req: ContextRequest,
+  res: Response,
   next: NextFunction,
 ) {
-  const propertyId = req.headers["x-property-id"] as string | undefined;
-  if (propertyId) {
-    (req as any).propertyId = propertyId;
-  }
-  next();
-}
+  void (async () => {
+    try {
+      if (!req.auth?.userId) {
+        throw new UnauthorizedError("Authentication required");
+      }
 
-export const requirePropertyContext = requireProperty;
+      const raw = String(
+        req.headers["x-property-id"] ?? req.query.propertyId ?? "",
+      ).trim();
+      if (!raw) {
+        throw new AppError("X-Property-Id header is required", 400, "PROPERTY_REQUIRED");
+      }
+
+      const allowed = await PropertyService.userCanAccessProperty(
+        req.auth.userId,
+        raw,
+        req.auth.isSuperAdmin,
+        req.auth.role,
+      );
+      if (!allowed) {
+        throw new PermissionError("You do not have access to this property");
+      }
+
+      req.propertyId = raw;
+      next();
+    } catch (e) {
+      next(e);
+    }
+  })();
+}

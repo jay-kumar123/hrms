@@ -10,7 +10,7 @@ const supabaseKey =
 if (!usingServiceRole && process.env.NODE_ENV !== "test") {
   console.warn(
     "[supabase] SUPABASE_SERVICE_ROLE_KEY is not set — using anon key. " +
-      "HRMS Database client initialized.",
+      "Run backend/sql/housekeeping-tasks-create-rpc.sql in Supabase if writes fail RLS.",
   );
 }
 

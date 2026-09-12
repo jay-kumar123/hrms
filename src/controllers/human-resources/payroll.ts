@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { hrModel, hrTables } from "../../models/human-resources/index.js";
-import { newId } from "../../models/base.js";
+import { newId } from "../../models/front-office/base.js";
 import {
   enrichPayrollRecord,
   enrichPayrollRecords,

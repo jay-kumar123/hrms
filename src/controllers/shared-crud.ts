@@ -6,7 +6,7 @@ import {
   listRows,
   newId,
   updateRow,
-} from "../models/base.js";
+} from "../models/front-office/base.js";
 import { fail, fromError, ok } from "../utils/response.js";
 
 type CrudOptions = {
@@ -32,6 +32,9 @@ export function createTableCrud(options: CrudOptions) {
         let rows = await listRows(options.table, {
           filters,
           orderBy: options.orderBy ?? idCol,
+        }).catch((err) => {
+          console.warn(`[CRUD ${options.table} list fallback]`, err.message || err);
+          return [];
         });
         if (options.mapOutgoing) {
           rows = rows.map((r: unknown) => options.mapOutgoing!(r));

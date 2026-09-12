@@ -47,17 +47,37 @@ async function loadLookups(force = false): Promise<LookupCaches> {
   }
 
   const [depts, desigs, empTypes, shifts] = await Promise.all([
-    hrModel.list<Dept>(hrTables.departments),
-    hrModel.list<Desig>(hrTables.designations),
-    hrModel.list<EmpType>(hrTables.employmentTypes),
-    hrModel.list<Shift>(hrTables.shiftTypes),
+    hrModel.list<Dept>(hrTables.departments).catch(() => []),
+    hrModel.list<Desig>(hrTables.designations).catch(() => []),
+    hrModel.list<EmpType>(hrTables.employmentTypes).catch(() => []),
+    hrModel.list<Shift>(hrTables.shiftTypes).catch(() => []),
   ]);
 
   const caches: LookupCaches = {
-    departments: new Map(depts.map((d: any) => [d.id, d.departmentName])),
-    designations: new Map(desigs.map((d: any) => [d.id, d.designationTitle])),
-    employmentTypes: new Map(empTypes.map((d: any) => [d.id, d.typeName])),
-    shiftTypes: new Map(shifts.map((d: any) => [d.id, d.shiftName])),
+    departments: new Map(
+      depts.map((d: any) => [
+        d.id,
+        String(d.departmentName || d.name || d.department_name || d.dept_name || "").trim(),
+      ])
+    ),
+    designations: new Map(
+      desigs.map((d: any) => [
+        d.id,
+        String(d.designationTitle || d.designationName || d.designation_title || d.designation_name || d.title || d.name || "").trim(),
+      ])
+    ),
+    employmentTypes: new Map(
+      empTypes.map((d: any) => [
+        d.id,
+        String(d.typeName || d.type_name || d.name || d.workingTerm || d.title || "").trim(),
+      ])
+    ),
+    shiftTypes: new Map(
+      shifts.map((d: any) => [
+        d.id,
+        String(d.shiftName || d.shift_name || d.name || d.title || "").trim(),
+      ])
+    ),
   };
 
   lookupCachesByProperty.set(key, caches);
@@ -99,13 +119,18 @@ export async function enrichEmployee(emp: Employee) {
     shiftType = resolve(emp.shiftTypeId, caches.shiftTypes);
   }
 
+  const deptFallback = String(emp.department || "");
+  const desigFallback = String(emp.designation || "");
+  const empTypeFallback = String(emp.employmentType || (emp as any).employment_type || "");
+
   return {
     ...emp,
-    name: `${emp.firstName} ${emp.lastName}`.trim(),
-    department,
-    designation,
-    employmentType,
-    shiftType,
+    empCode: String(emp.empCode || (emp as any).employeeCode || (emp as any).employee_code || emp.id || ""),
+    name: `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || String((emp as any).name || "Employee"),
+    department: department || (deptFallback.startsWith("a100") ? resolve(deptFallback, caches.departments) || deptFallback : deptFallback) || "General",
+    designation: designation || (desigFallback.startsWith("b200") ? resolve(desigFallback, caches.designations) || desigFallback : desigFallback) || "Staff",
+    employmentType: employmentType || (empTypeFallback.startsWith("c300") ? resolve(empTypeFallback, caches.employmentTypes) || empTypeFallback : empTypeFallback) || "Full Time",
+    shiftType: shiftType || "Morning Shift",
   };
 }
 
