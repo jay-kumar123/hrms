@@ -53,7 +53,7 @@ export function DepartmentMasterView() {
       const rows = await hrDepartmentService.list();
       setDepartments(rows.map(mapDepartmentFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load departments");
       setDepartments([]);
     } finally {
       setLoading(false);

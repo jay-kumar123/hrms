@@ -54,7 +54,7 @@ export function SalaryComponentsMasterView() {
       const rows = await hrSalaryComponentService.list();
       setComponents(rows.map(mapSalaryComponentFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load salary components");
       setComponents([]);
     }
   };

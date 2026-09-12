@@ -113,7 +113,7 @@ export function HolidayAttendanceView() {
       setRecords(rows.map((row) => mapHolidayAttendanceFromApi(row, lookup.get(String(row.employeeId)))));
       if (emps[0]) setAddEmpId(emps[0].id);
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load holiday attendance");
       setRecords([]);
       setEmployees([]);
     }

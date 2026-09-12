@@ -55,7 +55,7 @@ export function EmploymentTypesMasterView() {
       const rows = await hrEmploymentTypeService.list();
       setTypes(rows.map(mapEmploymentTypeFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load employment types");
       setTypes([]);
     }
   };

@@ -1303,11 +1303,17 @@ export function mapDashboardFromApi(data: Record<string, unknown>) {
     color: "bg-emerald-500",
   }));
 
+  const rawMale = Number(genderRaw.male ?? 0);
+  const rawFemale = Number(genderRaw.female ?? 0);
+  const rawOther = Number(genderRaw.other ?? 0);
+  const sumGender = rawMale + rawFemale + rawOther;
+  const genderTotal = Number(genderRaw.total ?? (sumGender > 0 ? sumGender : kpiSummary.totalEmployees));
+
   const genderDistribution = {
-    male: Number(genderRaw.male ?? 0),
-    female: Number(genderRaw.female ?? 0),
-    other: Number(genderRaw.other ?? 0),
-    total: Number(genderRaw.total ?? 0),
+    male: sumGender > 0 ? rawMale : genderTotal,
+    female: rawFemale,
+    other: rawOther,
+    total: genderTotal,
   };
 
   const events = ((data.events as Record<string, unknown>[]) ?? []).map((e) => ({

@@ -1,8 +1,6 @@
 "use client";
 
 import React, { useMemo, useState, useEffect, type ReactNode } from "react";
-import { supabase } from '@/lib/supabaseClient';
-
 import {
   ArrowLeft,
   Briefcase,
@@ -235,7 +233,7 @@ export function AddEmployeeView() {
           leavePolicyNameToId: buildNameIdMap(policyRows, "policyName"),
         });
       } catch (e) {
-        console.warn(e);
+        setToastMessage(e instanceof Error ? e.message : "Failed to load master data");
       }
     };
     void loadMasters();

@@ -55,7 +55,7 @@ export function LeaveTypesMasterView() {
       const rows = await hrLeaveTypeService.list();
       setLeaves(rows.map(mapLeaveTypeFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load leave types");
       setLeaves([]);
     }
   };

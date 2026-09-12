@@ -57,7 +57,7 @@ export function ShiftTypesMasterView() {
       const rows = await hrShiftTypeService.list();
       setShifts(rows.map(mapShiftTypeFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load shift types");
       setShifts([]);
     }
   };

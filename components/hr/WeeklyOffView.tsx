@@ -119,7 +119,7 @@ export function WeeklyOffView() {
       setAssignments(rows.map((row) => mapWeeklyOffFromApi(row, lookup.get(String(row.employeeId)))));
       if (emps[0]) setAssignEmpId(emps[0].id);
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load weekly offs");
       setAssignments([]);
       setEmployees([]);
     }

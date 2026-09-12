@@ -104,7 +104,7 @@ export function LeavePolicyMasterView() {
       setLeaveTypes(leaveTypeRows.map(mapLeaveTypeFromApi));
       setEmploymentTypes(employmentTypeRows.map(mapEmploymentTypeFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load leave policies");
       setPolicies([]);
       setLeaveTypes([]);
       setEmploymentTypes([]);

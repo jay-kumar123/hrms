@@ -74,7 +74,7 @@ export function DocumentMastersView() {
         ),
       );
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load document masters");
       setCategories([]);
       setDocumentTypes([]);
     }
