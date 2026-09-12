@@ -47,33 +47,33 @@ async function loadLookups(force = false): Promise<LookupCaches> {
   }
 
   const [depts, desigs, empTypes, shifts] = await Promise.all([
-    hrModel.list<Dept>(hrTables.departments),
-    hrModel.list<Desig>(hrTables.designations),
-    hrModel.list<EmpType>(hrTables.employmentTypes),
-    hrModel.list<Shift>(hrTables.shiftTypes),
+    hrModel.list<Dept>(hrTables.departments).catch(() => []),
+    hrModel.list<Desig>(hrTables.designations).catch(() => []),
+    hrModel.list<EmpType>(hrTables.employmentTypes).catch(() => []),
+    hrModel.list<Shift>(hrTables.shiftTypes).catch(() => []),
   ]);
 
   const caches: LookupCaches = {
     departments: new Map(
-      depts.map((d: any) => [
+      (depts || []).map((d: any) => [
         d.id,
         String(d.departmentName || d.name || d.department_name || d.dept_name || "").trim(),
       ])
     ),
     designations: new Map(
-      desigs.map((d: any) => [
+      (desigs || []).map((d: any) => [
         d.id,
         String(d.designationTitle || d.designationName || d.designation_title || d.designation_name || d.title || d.name || "").trim(),
       ])
     ),
     employmentTypes: new Map(
-      empTypes.map((d: any) => [
+      (empTypes || []).map((d: any) => [
         d.id,
         String(d.typeName || d.type_name || d.name || d.workingTerm || d.title || "").trim(),
       ])
     ),
     shiftTypes: new Map(
-      shifts.map((d: any) => [
+      (shifts || []).map((d: any) => [
         d.id,
         String(d.shiftName || d.shift_name || d.name || d.title || "").trim(),
       ])
@@ -92,7 +92,8 @@ export function clearHrLookupCache(propertyId?: string) {
   lookupCachesByProperty.clear();
 }
 
-export async function enrichEmployee(emp: Employee) {
+export async function enrichEmployee(emp: any) {
+  if (!emp) return emp;
   let caches = await loadLookups();
 
   const resolve = (id: string | undefined, map: Map<string, string>) => {
@@ -100,28 +101,23 @@ export async function enrichEmployee(emp: Employee) {
     return map.get(id) ?? "";
   };
 
-  let department = resolve(emp.departmentId, caches.departments);
-  let designation = resolve(emp.designationId, caches.designations);
-  let employmentType = resolve(emp.employmentTypeId, caches.employmentTypes);
-  let shiftType = resolve(emp.shiftTypeId, caches.shiftTypes);
+  const deptId = emp.departmentId || emp.department_id;
+  const desigId = emp.designationId || emp.designation_id;
+  const empTypeId = emp.employmentTypeId || emp.employment_type_id;
+  const shiftId = emp.shiftTypeId || emp.shift_type_id;
 
-  // Self-heal stale/empty cache (e.g. first load before RLS patch or property switch).
-  if (
-    (emp.departmentId && !department) ||
-    (emp.designationId && !designation) ||
-    (emp.employmentTypeId && !employmentType) ||
-    (emp.shiftTypeId && !shiftType)
-  ) {
-    caches = await loadLookups(true);
-    department = resolve(emp.departmentId, caches.departments);
-    designation = resolve(emp.designationId, caches.designations);
-    employmentType = resolve(emp.employmentTypeId, caches.employmentTypes);
-    shiftType = resolve(emp.shiftTypeId, caches.shiftTypes);
-  }
+  let department = resolve(deptId, caches.departments) || emp.department || "";
+  let designation = resolve(desigId, caches.designations) || emp.designation || "";
+  let employmentType = resolve(empTypeId, caches.employmentTypes) || emp.employmentType || emp.employment_type || "";
+  let shiftType = resolve(shiftId, caches.shiftTypes) || emp.shiftType || emp.shift_type || "";
+
+  const firstName = emp.firstName || emp.first_name || "";
+  const lastName = emp.lastName || emp.last_name || "";
+  const name = `${firstName} ${lastName}`.trim() || emp.name || emp.empCode || emp.emp_code || "Employee";
 
   return {
     ...emp,
-    name: `${emp.firstName} ${emp.lastName}`.trim(),
+    name,
     department,
     designation,
     employmentType,
@@ -129,7 +125,8 @@ export async function enrichEmployee(emp: Employee) {
   };
 }
 
-export async function enrichEmployees(rows: Employee[]) {
+export async function enrichEmployees(rows: any[]) {
+  if (!Array.isArray(rows)) return [];
   await loadLookups();
   return Promise.all(rows.map((e) => enrichEmployee(e)));
 }
