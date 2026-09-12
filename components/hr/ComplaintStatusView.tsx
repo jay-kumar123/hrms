@@ -70,7 +70,7 @@ export function ComplaintStatusView() {
       const lookup = new Map(empRows.map(mapEmployeeFromApi).map((e) => [e.id, e]));
       setTickets(rows.map((row) => mapComplaintToStatusTicket(row, lookup.get(String(row.employeeId)))));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load tickets");
       setTickets([]);
     }
   };
@@ -301,7 +301,13 @@ export function ComplaintStatusView() {
             <tbody className="divide-y divide-slate-100">
               {filteredTickets.length > 0 ? (
                 filteredTickets.map((t) => {
-                  const activeStep = t.steps.find((s) => s.active) || t.steps[0];
+                  const activeStep =
+                    t.steps?.find((s) => s.active) ||
+                    t.steps?.[0] || {
+                      title: t.status || "Complaint Logged",
+                      completed: false,
+                      active: true,
+                    };
 
                   return (
                     <tr
@@ -323,7 +329,7 @@ export function ComplaintStatusView() {
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
                           <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                          <span>{activeStep.title}</span>
+                          <span>{activeStep?.title || t.status || "Complaint Logged"}</span>
                         </div>
                         <p className="text-[10px] text-slate-400 font-mono pt-0.5">
                           Updated: {t.lastUpdated}
@@ -375,7 +381,13 @@ export function ComplaintStatusView() {
       {/* Mobile Stacked Cards View */}
       <div className="sm:hidden space-y-3">
         {filteredTickets.map((t) => {
-          const activeStep = t.steps.find((s) => s.active) || t.steps[0];
+          const activeStep =
+            t.steps?.find((s) => s.active) ||
+            t.steps?.[0] || {
+              title: t.status || "Complaint Logged",
+              completed: false,
+              active: true,
+            };
 
           return (
             <div
@@ -396,7 +408,7 @@ export function ComplaintStatusView() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
                 <div className="flex justify-between items-center">
                   <span className="text-slate-500 font-medium">Stage:</span>
-                  <strong className="text-slate-900">{activeStep.title}</strong>
+                  <strong className="text-slate-900">{activeStep?.title || t.status || "Complaint Logged"}</strong>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500 font-medium">Officer:</span>
@@ -449,7 +461,7 @@ export function ComplaintStatusView() {
               </span>
 
               <div className="space-y-4 relative border-l-2 border-slate-200 ml-3 pl-4 pt-1">
-                {viewingTicket.steps.map((step, idx) => (
+                {(viewingTicket.steps || []).map((step, idx) => (
                   <div key={idx} className="relative space-y-0.5">
                     {/* Circle Bullet */}
                     <div

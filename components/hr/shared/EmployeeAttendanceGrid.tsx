@@ -29,7 +29,12 @@ import {
   type EmployeeAttendanceDay,
   type EmployeeAttendanceStatus,
 } from "@/lib/hr/employee-attendance";
-import { hrAttendanceService } from "@/services/human-resources";
+import {
+  hrAttendanceService,
+  hrHolidayService,
+  hrLeaveApplicationService,
+  hrShiftAssignmentService,
+} from "@/services/human-resources";
 import { mapAttendanceFromApi } from "@/lib/hr/api-mappers";
 
 const COMPACT_WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"] as const;
@@ -104,16 +109,123 @@ export function EmployeeAttendanceGrid({
     let cancelled = false;
     void (async () => {
       try {
-        const rows = await hrAttendanceService.getForEmployee(employeeId);
+        const [rows, holidays, leaveApps, shiftAssigns] = await Promise.all([
+          hrAttendanceService.getForEmployee(employeeId).catch(() => []),
+          hrHolidayService.list().catch(() => []),
+          hrLeaveApplicationService.list().catch(() => []),
+          hrShiftAssignmentService.list().catch(() => []),
+        ]);
         if (cancelled) return;
         const map = new Map<string, CalendarAttendanceOverlay>();
+
+        const parseToIso = (dStr: string) => {
+          const s = dStr.trim();
+          if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+          if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+            const [d, m, y] = s.split("/");
+            return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+          }
+          return "";
+        };
+
+        // 1. Overlay shift assignments for this employee
+        for (const sa of shiftAssigns) {
+          const rawEmpId = String((sa as Record<string, unknown>).employeeId || (sa as Record<string, unknown>).employee_id || "");
+          if (rawEmpId !== employeeId) continue;
+          const rawFrom = String((sa as Record<string, unknown>).effectiveFrom || (sa as Record<string, unknown>).effective_from || "");
+          const rawTo = String((sa as Record<string, unknown>).effectiveTo || (sa as Record<string, unknown>).effective_to || "");
+          const fromIso = parseToIso(rawFrom);
+          const toIso = rawTo ? parseToIso(rawTo) : "2099-12-31";
+          if (!fromIso) continue;
+
+          const sName = String((sa as Record<string, unknown>).shiftName || (sa as Record<string, unknown>).shift_name || "Assigned Shift");
+          const sTiming = (sa as Record<string, unknown>).startTime && (sa as Record<string, unknown>).endTime
+            ? `${(sa as Record<string, unknown>).startTime} - ${(sa as Record<string, unknown>).endTime}`
+            : "";
+          const fullShiftLabel = sTiming ? `${sName} (${sTiming})` : sName;
+
+          const cur = new Date(fromIso);
+          const end = new Date(toIso || fromIso);
+          while (cur <= end) {
+            const dateKey = cur.toISOString().slice(0, 10);
+            const existing = map.get(dateKey);
+            if (existing) {
+              existing.shiftName = fullShiftLabel;
+            } else {
+              map.set(dateKey, {
+                status: "Pending",
+                shiftName: fullShiftLabel,
+                checkIn: "-",
+                checkOut: "-",
+                workedHours: 0,
+              });
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+
+        // 2. Map registered holidays
+        for (const h of holidays) {
+          const rawDate = String((h as Record<string, unknown>).holidayDate || (h as Record<string, unknown>).holiday_date || "").trim();
+          const iso = parseToIso(rawDate);
+          if (!iso) continue;
+          const prev = map.get(iso);
+          map.set(iso, {
+            status: "Holiday",
+            shiftName: prev?.shiftName || String((h as Record<string, unknown>).holidayName || (h as Record<string, unknown>).name || "Public Holiday"),
+            checkIn: "-",
+            checkOut: "-",
+            workedHours: 0,
+            leaveTypeName: String((h as Record<string, unknown>).holidayName || (h as Record<string, unknown>).name || "Holiday"),
+            dayType: "Holiday",
+          });
+        }
+
+        // 3. Overlay approved leaves for this employee
+        for (const app of leaveApps) {
+          const rawEmpId = String((app as Record<string, unknown>).employeeId || (app as Record<string, unknown>).employee_id || "");
+          const status = String((app as Record<string, unknown>).status || "");
+          if (rawEmpId !== employeeId || status.toLowerCase() !== "approved") continue;
+
+          const rawFrom = String((app as Record<string, unknown>).fromDate || (app as Record<string, unknown>).from_date || "");
+          const rawTo = String((app as Record<string, unknown>).toDate || (app as Record<string, unknown>).to_date || rawFrom);
+          const fromIso = parseToIso(rawFrom);
+          const toIso = parseToIso(rawTo);
+          if (!fromIso) continue;
+
+          const endIso = toIso || fromIso;
+          const cur = new Date(fromIso);
+          const end = new Date(endIso);
+
+          const leaveName = String((app as Record<string, unknown>).leaveTypeName || (app as Record<string, unknown>).leave_type_name || "Leave");
+
+          while (cur <= end) {
+            const dateKey = cur.toISOString().slice(0, 10);
+            if (!map.has(dateKey) || map.get(dateKey)?.status !== "Holiday") {
+              const prev = map.get(dateKey);
+              map.set(dateKey, {
+                status: "On Leave",
+                shiftName: leaveName || prev?.shiftName,
+                checkIn: "-",
+                checkOut: "-",
+                workedHours: 0,
+                leaveTypeName: leaveName,
+                dayType: "Leave",
+              });
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+        }
+
+        // 4. Overlay individual attendance records
         for (const row of rows) {
           const mapped = mapAttendanceFromApi(row);
           const iso = String(row.attendanceDate ?? row.recordDate ?? "").slice(0, 10);
           if (!iso) continue;
+          const prev = map.get(iso);
           map.set(iso, {
             status: mapped.status,
-            shiftName: mapped.shiftName,
+            shiftName: prev?.shiftName || mapped.shiftName,
             checkIn: mapped.checkIn,
             checkOut: mapped.checkOut,
             workedHours: mapped.workedHours,
@@ -456,7 +568,7 @@ function CalendarPanel({
             <LegendDot compact className="bg-sky-300" label="Leave" />
             <LegendDot compact className="bg-amber-100 border border-amber-300" label="Pending" />
             <LegendDot compact className="bg-rose-300" label="Absent" />
-            <LegendDot compact className="bg-violet-300" label="Holiday" />
+            <LegendDot compact className="bg-violet-600" label="Holiday" />
           </div>
 
           {showFullAttendanceLink ? (
@@ -520,7 +632,7 @@ function CalendarPanel({
         <LegendDot className="bg-sky-300" label="Leave" />
         <LegendDot className="bg-amber-100 border border-amber-300" label="Pending" />
         <LegendDot className="bg-rose-300" label="Absent" />
-        <LegendDot className="bg-violet-300" label="Holiday" />
+        <LegendDot className="bg-violet-600" label="Holiday" />
         <LegendDot className="bg-slate-100 border border-slate-200" label="Weekly off" />
       </div>
 

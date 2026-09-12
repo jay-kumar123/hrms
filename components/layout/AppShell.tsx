@@ -7,22 +7,32 @@ import { MobileNavProvider } from "./MobileNavContext";
 
 interface AppShellProps {
   children: React.ReactNode;
-  navItems: NavItem[];
+  navItems?: NavItem[];
   user: UserProfile;
   moduleSidebar?: React.ReactNode;
   subNav?: React.ReactNode;
+  hideTopNav?: boolean;
 }
 
-export function AppShell({ children, navItems, user, moduleSidebar, subNav }: AppShellProps) {
+export function AppShell({
+  children,
+  navItems = [],
+  user,
+  moduleSidebar,
+  subNav,
+  hideTopNav = false,
+}: AppShellProps) {
   return (
     <MobileNavProvider enabled={!!moduleSidebar}>
       <div className="flex h-screen min-w-0 overflow-hidden bg-[#f7f8f7]">
         {moduleSidebar}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Header user={user} />
-          <div className="shrink-0 border-b border-neutral-800 bg-black px-3 py-2 sm:px-4 lg:px-6">
-            <TopNav items={navItems} />
-          </div>
+          {!hideTopNav && navItems.length > 0 && (
+            <div className="shrink-0 border-b border-neutral-800 bg-black px-3 py-2 sm:px-4 lg:px-6">
+              <TopNav items={navItems} />
+            </div>
+          )}
           {subNav && (
             <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-4 lg:px-6">
               {subNav}

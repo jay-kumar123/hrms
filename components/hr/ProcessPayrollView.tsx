@@ -46,8 +46,8 @@ import { ModulePageShell } from "@/components/pms";
 import { Button, Drawer, Modal, StatusBadge } from "@/components/ui";
 import { HRKPICard } from "@/components/hr/shared/HRKPICard";
 import { HREmployeeCell } from "@/components/hr/shared/HREmployeeCell";
-import { hrPayrollService } from "@/services/human-resources";
-import { mapAuditFromApi, mapPayrollFromApi } from "@/lib/hr/api-mappers";
+import { hrPayrollService, hrEmployeeService, hrSalaryStructureService } from "@/services/human-resources";
+import { mapAuditFromApi, mapPayrollFromApi, mapEmployeeFromApi, mapSalaryStructureFromApi } from "@/lib/hr/api-mappers";
 import { MONTH_NAME_TO_NUMBER } from "@/lib/hr/useHrList";
 import { cn } from "@/lib/utils";
 
@@ -197,7 +197,7 @@ export function ProcessPayrollView() {
   const [isPayrollLocked, setIsPayrollLocked] = useState(false);
   
   // Status Flow: Draft -> Calculated -> Verified -> Approved -> Paid
-  const [overallPayrollStage, setOverallPayrollStage] = useState<"Draft" | "Calculated" | "Verified" | "Approved" | "Paid" | "Payslip Generated">("Calculated");
+  const [overallPayrollStage, setOverallPayrollStage] = useState<"Draft" | "Calculated" | "Verified" | "Approved" | "Paid" | "Payslip Generated">("Draft");
 
   // Selection & Row Expansion
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
@@ -239,12 +239,30 @@ export function ProcessPayrollView() {
         hrPayrollService.listRecords(month, year),
         hrPayrollService.listAuditLogs(),
       ]);
-      setRecords(payrollRows.map(mapPayrollFromApi));
+      const mapped = payrollRows.map(mapPayrollFromApi);
+      setRecords(mapped);
       setAuditLogs(auditRows.map(mapAuditFromApi));
+
+      if (mapped.length === 0) {
+        setOverallPayrollStage("Draft");
+      } else if (mapped.every((r) => r.status === "Paid" || r.status === "Locked")) {
+        setOverallPayrollStage("Paid");
+      } else if (mapped.some((r) => r.payslipGenerated)) {
+        setOverallPayrollStage("Payslip Generated");
+      } else if (mapped.every((r) => r.status === "Approved")) {
+        setOverallPayrollStage("Approved");
+      } else if (mapped.some((r) => r.status === "Verified")) {
+        setOverallPayrollStage("Verified");
+      } else if (mapped.some((r) => r.status === "Calculated")) {
+        setOverallPayrollStage("Calculated");
+      } else {
+        setOverallPayrollStage("Draft");
+      }
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load payroll data");
       setRecords([]);
       setAuditLogs([]);
+      setOverallPayrollStage("Draft");
     } finally {
       setLoadingPayroll(false);
     }
@@ -327,23 +345,113 @@ export function ProcessPayrollView() {
   }, [records]);
 
   // Step 2 & 4: Automatic Data Fetch & Recalculate Handler
-  const handleCalculatePayroll = () => {
+  const handleCalculatePayroll = async () => {
     if (isPayrollLocked) return;
     setIsGenerating(true);
-    setTimeout(() => {
-      setIsGenerating(false);
-      setOverallPayrollStage("Calculated");
-      setRecords((prev) =>
-        prev.map((r) => ({
-          ...r,
-          status: "Calculated",
+    try {
+      const month = MONTH_NAME_TO_NUMBER[selectedMonth];
+      const year = Number(selectedYear);
+
+      // Fetch current active employees and salary structures
+      const [empRows, structureRows] = await Promise.all([
+        hrEmployeeService.list(),
+        hrSalaryStructureService.list(),
+      ]);
+      const employees = empRows.map(mapEmployeeFromApi).filter((e) => e.status === "Active" || !e.status);
+      const structures = structureRows.map(mapSalaryStructureFromApi);
+
+      if (employees.length === 0) {
+        setToastMessage("No active employees found in Employee List. Please add employees first.");
+        setIsGenerating(false);
+        return;
+      }
+
+      const calculatedRecords: EmployeePayrollRecord[] = employees.map((emp) => {
+        // Check if matching salary structure exists
+        const struct = structures.find(
+          (s) => s.id === emp.salaryStructureId || s.name === emp.salaryStructureName
+        );
+
+        const empSalary = emp.structureGrossSalary || 25000;
+
+        const basicSalary =
+          struct?.earnings.find((e) => e.componentName.toLowerCase().includes("basic"))?.computedAmount ||
+          Math.round(empSalary * 0.5);
+
+        const hra =
+          struct?.earnings.find((e) => e.componentName.toLowerCase().includes("hra") || e.componentName.toLowerCase().includes("house"))?.computedAmount ||
+          Math.round(empSalary * 0.3);
+
+        const allowances = struct
+          ? Math.max(0, struct.grossSalary - basicSalary - hra)
+          : Math.max(0, empSalary - basicSalary - hra);
+
+        const grossSalary = struct ? struct.grossSalary : (emp.structureGrossSalary || basicSalary + hra + allowances);
+
+        const pfDeduction =
+          struct?.deductions.find((d) => d.componentName.toLowerCase().includes("pf") || d.componentName.toLowerCase().includes("provident"))?.computedAmount ||
+          Math.round(basicSalary * 0.12);
+
+        const ptDeduction =
+          struct?.deductions.find((d) => d.componentName.toLowerCase().includes("pt") || d.componentName.toLowerCase().includes("professional") || d.componentName.toLowerCase().includes("tax"))?.computedAmount ||
+          200;
+
+        const tdsDeduction =
+          struct?.deductions.find((d) => d.componentName.toLowerCase().includes("tds"))?.computedAmount ||
+          0;
+
+        const otherDeductions = struct ? Math.max(0, struct.totalDeductions - pfDeduction - ptDeduction - tdsDeduction) : 0;
+        const totalDeductions = pfDeduction + ptDeduction + tdsDeduction + otherDeductions;
+        const netSalary = Math.max(0, grossSalary - totalDeductions);
+
+        return {
+          id: `PAY-${year}-${String(month).padStart(2, "0")}-${emp.id}`,
+          employeeId: emp.id,
+          payrollMonth: month,
+          payrollYear: year,
+          payrollId: `PAY-${year}${String(month).padStart(2, "0")}-${emp.empCode || emp.id.slice(0, 6)}`,
+          employeeName: emp.name || emp.empCode || "Employee",
+          department: emp.department || "General",
+          designation: emp.designation || "Staff",
+          avatar: emp.avatar || (emp.name ? emp.name.slice(0, 2).toUpperCase() : "EM"),
+          photoUrl: emp.photoUrl,
+          grossSalary,
+          earningsTotal: grossSalary,
+          basicSalary,
+          hra,
+          allowances,
+          overtimePay: 0,
+          holidayPay: 0,
+          incentives: 0,
+          bonus: 0,
+          otherEarnings: 0,
+          leaveDeduction: 0,
+          pfDeduction,
+          esiDeduction: 0,
+          ptDeduction,
+          tdsDeduction,
+          otherDeductions,
+          deductionsTotal: totalDeductions,
+          netSalary,
+          status: "Calculated" as PayrollStatus,
           calculatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-        }))
-      );
-      addAuditEntry(`Fetched and calculated payroll inputs for ${selectedMonth} ${selectedYear}`);
-      setToastMessage(`Payroll calculated successfully for ${selectedMonth} ${selectedYear}! Fetched Attendance, Leaves, OT & Tax modules.`);
-    }, 800);
+          missingSalaryStructure: !struct && !emp.salaryStructureId,
+          missingBankDetails: !emp.bankAccount,
+          missingPan: !emp.panNumber,
+        };
+      });
+
+      setRecords(calculatedRecords);
+      setOverallPayrollStage("Calculated");
+      addAuditEntry(`Fetched and calculated payroll inputs for ${employees.length} employees (${selectedMonth} ${selectedYear})`);
+      setToastMessage(`Payroll calculated successfully for ${employees.length} employees (${selectedMonth} ${selectedYear})!`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to calculate payroll");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   // Step 5: Approve Payroll Handler
@@ -1265,7 +1373,7 @@ export function ProcessPayrollView() {
           description={`Override earnings or deductions for ${selectedMonth} ${selectedYear}.`}
           size="lg"
         >
-          <form onSubmit={handleSaveEdit} className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 text-xs">
+          <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
               <HREmployeeCell
                 name={editingRecord.employeeName}
@@ -1572,7 +1680,7 @@ export function ProcessPayrollView() {
           description={`${formatPayrollPeriod(viewingPayslipRecord.payrollMonth, viewingPayslipRecord.payrollYear)} · ${viewingPayslipRecord.payrollId}`}
           size="xl"
         >
-          <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1 text-xs">
+          <div className="space-y-4 text-xs">
             <div className="p-6 rounded-2xl border border-slate-300 bg-white space-y-4 shadow-sm">
               <div className="flex justify-between items-start border-b border-slate-200 pb-4">
                 <div>
@@ -1651,7 +1759,7 @@ export function ProcessPayrollView() {
           description={`Create a salary_payments entry for ${formatPayrollPeriod(recordingPaymentRecord.payrollMonth, recordingPaymentRecord.payrollYear)}.`}
           size="md"
         >
-          <form onSubmit={handleSinglePaymentSubmit} className="space-y-4 text-xs max-h-[75vh] overflow-y-auto pr-1">
+          <form onSubmit={handleSinglePaymentSubmit} className="space-y-4 text-xs">
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
               <HREmployeeCell
                 name={recordingPaymentRecord.employeeName}

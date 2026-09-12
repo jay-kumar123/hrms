@@ -45,7 +45,7 @@ export function ComplaintCategoriesView() {
       const rows = await hrComplaintCategoryService.list();
       setCategories(rows.map(mapComplaintCategoryFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load categories");
       setCategories([]);
     }
   };

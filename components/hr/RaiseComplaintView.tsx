@@ -19,15 +19,24 @@ import {
   User,
   Building2,
   Calendar,
-  ChevronRight,
   Upload,
   Info,
+  RefreshCw,
 } from "lucide-react";
 import { ModulePageShell } from "@/components/pms";
 import { Button, Drawer, Modal, StatusBadge } from "@/components/ui";
 import { HRKPICard } from "@/components/hr/shared/HRKPICard";
-import { hrComplaintService } from "@/services/human-resources";
-import { mapComplaintToGrievance, mapComplaintToApi } from "@/lib/hr/api-mappers";
+import {
+  hrComplaintService,
+  hrEmployeeService,
+  hrComplaintCategoryService,
+} from "@/services/human-resources";
+import {
+  mapComplaintToGrievance,
+  mapComplaintToApi,
+  mapEmployeeFromApi,
+} from "@/lib/hr/api-mappers";
+import type { EmployeeItem } from "@/app/data/hr/employeeListData";
 import { HREmployeeCell } from "@/components/hr/shared/HREmployeeCell";
 
 export type GrievanceStatus = "Open" | "In Review" | "Resolved" | "Escalated" | "Closed";
@@ -77,20 +86,45 @@ const ACTIVE_CATEGORIES = [
 
 export function RaiseComplaintView() {
   const [complaints, setComplaints] = useState<GrievanceComplaint[]>([]);
+  const [employees, setEmployees] = useState<EmployeeItem[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<string[]>(ACTIVE_CATEGORIES);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const loadComplaints = async () => {
     try {
-      const rows = await hrComplaintService.list();
-      setComplaints(rows.map((row) => mapComplaintToGrievance(row)));
+      const [rows, empRows, catRows] = await Promise.all([
+        hrComplaintService.list().catch(() => []),
+        hrEmployeeService.list().catch(() => []),
+        hrComplaintCategoryService.list().catch(() => []),
+      ]);
+
+      const mappedEmps = (empRows as Record<string, unknown>[]).map(mapEmployeeFromApi);
+      setEmployees(mappedEmps);
+
+      if (Array.isArray(catRows) && catRows.length > 0) {
+        const dynamicCats = catRows
+          .map((c) => String(c.categoryName || c.category_name || c.name || "").trim())
+          .filter(Boolean);
+        if (dynamicCats.length > 0) {
+          setAvailableCategories(Array.from(new Set([...dynamicCats, ...ACTIVE_CATEGORIES])));
+        }
+      }
+
+      const empLookup = new Map(mappedEmps.map((e) => [e.id, e]));
+      setComplaints(
+        (rows as Record<string, unknown>[]).map((row) =>
+          mapComplaintToGrievance(row, empLookup.get(String(row.employeeId || row.employee_id))),
+        ),
+      );
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load complaints");
       setComplaints([]);
     }
   };
 
-  useEffect(() => { void loadComplaints(); }, []);
-
-
+  useEffect(() => {
+    void loadComplaints();
+  }, []);
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -103,6 +137,7 @@ export function RaiseComplaintView() {
   const [viewingComplaint, setViewingComplaint] = useState<GrievanceComplaint | null>(null);
 
   // Form State for Raising New Complaint
+  const [formEmployeeId, setFormEmployeeId] = useState("");
   const [formCategory, setFormCategory] = useState(ACTIVE_CATEGORIES[0]);
   const [formSubject, setFormSubject] = useState("");
   const [formDescription, setFormDescription] = useState("");
@@ -110,6 +145,7 @@ export function RaiseComplaintView() {
   const [formPriority, setFormPriority] = useState<GrievancePriority>("Medium");
   const [formIsAnonymous, setFormIsAnonymous] = useState(false);
   const [formAttachment, setFormAttachment] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // KPI Metrics
   const stats = useMemo(() => {
@@ -141,18 +177,32 @@ export function RaiseComplaintView() {
   const handleRaiseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmitting) return;
+
+    if (!formEmployeeId && !formIsAnonymous) {
+      alert("Please select the employee filing the grievance.");
+      return;
+    }
+
     if (!formSubject.trim() || !formDescription.trim()) {
       alert("Please provide both a subject line and description of your grievance.");
       return;
     }
 
+    const selectedEmp = employees.find((e) => e.id === formEmployeeId);
+    setIsSubmitting(true);
+
     try {
       const created = await hrComplaintService.create(
         mapComplaintToApi({
+          employeeId: formEmployeeId || undefined,
+          employeeName: selectedEmp?.name,
+          department: selectedEmp?.department,
+          designation: selectedEmp?.designation,
           category: formCategory,
           subject: formSubject.trim(),
           description: formDescription.trim(),
-          incidentDate: formIncidentDate.split("-").reverse().join("/"),
+          incidentDate: formIncidentDate,
           priority: formPriority,
           status: "Open",
           isAnonymous: formIsAnonymous,
@@ -161,15 +211,23 @@ export function RaiseComplaintView() {
       );
       await loadComplaints();
       setIsRaiseModalOpen(false);
+      setFormEmployeeId("");
       setFormSubject("");
       setFormDescription("");
       setFormIsAnonymous(false);
       setFormAttachment(null);
+      const ticketNum = String(
+        (created as Record<string, unknown>).ticketNo ||
+          (created as Record<string, unknown>).ticket_no ||
+          "",
+      );
       setToastMessage(
-        `Grievance submitted successfully! Ticket #${String((created as Record<string, unknown>).ticketNo ?? "")} created.`,
+        `Grievance submitted successfully! Ticket #${ticketNum} created in Supabase.`,
       );
     } catch (err) {
       setToastMessage(err instanceof Error ? err.message : "Failed to submit complaint");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -475,10 +533,35 @@ export function RaiseComplaintView() {
           isOpen={isRaiseModalOpen}
           onClose={() => setIsRaiseModalOpen(false)}
           title="Raise Grievance / Complaint"
-          description="Submit a detailed grievance to HR for review. You may opt for anonymous submission."
+          description="Submit a detailed grievance to HR for review. Select the employee filing the grievance, or opt for anonymous submission."
           size="lg"
         >
-          <form onSubmit={handleRaiseSubmit} className="space-y-4 text-xs max-h-[75vh] overflow-y-auto pr-1">
+          <form onSubmit={handleRaiseSubmit} className="space-y-4 text-xs">
+            {/* Select Employee */}
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Select Employee / Complainant {!formIsAnonymous && <span className="text-rose-500">*</span>}
+              </label>
+              <select
+                value={formEmployeeId}
+                onChange={(e) => setFormEmployeeId(e.target.value)}
+                required={!formIsAnonymous}
+                className="w-full rounded-xl border border-slate-200 p-2.5 font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none"
+              >
+                <option value="">-- Choose Employee --</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} ({emp.empCode}) • {emp.designation} - {emp.department}
+                  </option>
+                ))}
+              </select>
+              {formIsAnonymous && (
+                <p className="mt-1 text-[11px] text-amber-700 font-medium">
+                  Anonymous mode active: The selected employee identity will remain confidential in investigations.
+                </p>
+              )}
+            </div>
+
             {/* Category Select */}
             <div>
               <label className="block font-bold text-slate-700 mb-1">
@@ -489,7 +572,7 @@ export function RaiseComplaintView() {
                 onChange={(e) => setFormCategory(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 p-2.5 font-semibold text-slate-900 bg-white"
               >
-                {ACTIVE_CATEGORIES.map((cat) => (
+                {availableCategories.map((cat) => (
                   <option key={cat} value={cat}>
                     {cat}
                   </option>
@@ -587,6 +670,7 @@ export function RaiseComplaintView() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={isSubmitting}
                 onClick={() => setIsRaiseModalOpen(false)}
                 className="rounded-xl text-xs"
               >
@@ -595,10 +679,20 @@ export function RaiseComplaintView() {
               <Button
                 type="submit"
                 size="sm"
-                className="rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white"
+                disabled={isSubmitting}
+                className="rounded-xl text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <Send className="mr-1.5 h-3.5 w-3.5" />
-                Submit Grievance
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-1.5 h-3.5 w-3.5" />
+                    Submit Grievance
+                  </>
+                )}
               </Button>
             </div>
           </form>

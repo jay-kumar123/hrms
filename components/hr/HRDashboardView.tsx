@@ -144,9 +144,9 @@ export function HRDashboardView() {
     other: 0,
     total: 0,
   });
-  const [activities] = useState<HRActivityItem[]>([]);
-  const [events] = useState<EmployeeEventItem[]>([]);
-  const [holidaysAndShifts] = useState<HolidayShiftItem[]>([]);
+  const [activities, setActivities] = useState<HRActivityItem[]>([]);
+  const [events, setEvents] = useState<EmployeeEventItem[]>([]);
+  const [holidaysAndShifts, setHolidaysAndShifts] = useState<HolidayShiftItem[]>([]);
   const [leavesList, setLeavesList] = useState<PendingLeaveItem[]>([]);
   const [selectedDesigDept, setSelectedDesigDept] = useState<string>("All");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -171,6 +171,9 @@ export function HRDashboardView() {
         setWeeklyTrend(mapped.weeklyTrend);
         setDesignationHeadcounts(mapped.designationHeadcounts);
         setGenderDistribution(mapped.genderDistribution);
+        setEvents(mapped.events);
+        setHolidaysAndShifts(mapped.holidaysAndShifts);
+        setActivities(mapped.activities);
         const pendingLeaves = leaveRows
           .filter((row) => String(row.status) === "Pending")
           .map((row) => {
@@ -189,7 +192,7 @@ export function HRDashboardView() {
           });
         setLeavesList(pendingLeaves);
       } catch (e) {
-        console.warn(e);
+        setToastMessage(e instanceof Error ? e.message : "Failed to load dashboard");
       }
     };
     void loadDashboard();
@@ -651,25 +654,51 @@ export function HRDashboardView() {
         <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2 lg:gap-8">
           <PanelCard title="Birthdays & work anniversaries" subtitle="Upcoming celebrations">
             <div className="space-y-2.5">
-              {events.map((ev) => (
-                <ListRow key={ev.id} className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-700">
-                      {ev.avatar}
+              {events.length === 0 ? (
+                <p className="py-6 text-center text-xs text-slate-400">No upcoming celebrations.</p>
+              ) : (
+                events.map((ev) => (
+                  <ListRow key={ev.id} className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-xs",
+                          ev.type === "birthday"
+                            ? "bg-pink-100/90 text-pink-700 border border-pink-200/60"
+                            : "bg-indigo-100/90 text-indigo-700 border border-indigo-200/60",
+                        )}
+                      >
+                        {ev.type === "birthday" ? (
+                          <Gift className="h-4 w-4 text-pink-600" />
+                        ) : (
+                          <Award className="h-4 w-4 text-indigo-600" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-slate-900">{ev.name}</p>
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                              ev.type === "birthday"
+                                ? "bg-pink-50 text-pink-700 border border-pink-200/70"
+                                : "bg-indigo-50 text-indigo-700 border border-indigo-200/70",
+                            )}
+                          >
+                            {ev.type === "birthday"
+                              ? "🎂 Birthday"
+                              : `🎉 ${ev.years === 1 ? "1st" : `${ev.years}th`} Work Anniversary`}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500">{ev.department}</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{ev.name}</p>
-                      <p className="text-xs text-slate-500">
-                        {ev.department}
-                        {ev.years ? ` · ${ev.years} years` : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 rounded-md bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">
-                    {ev.date}
-                  </span>
-                </ListRow>
-              ))}
+                    <span className="shrink-0 rounded-lg bg-slate-100/80 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                      {ev.date}
+                    </span>
+                  </ListRow>
+                ))
+              )}
             </div>
           </PanelCard>
 

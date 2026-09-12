@@ -15,7 +15,6 @@ import { SalaryStructureView } from "@/components/hr/SalaryStructureView";
 import { PayrollSettingsView } from "@/components/hr/PayrollSettingsView";
 import { ProcessPayrollView } from "@/components/hr/ProcessPayrollView";
 import { PayslipsView } from "@/components/hr/PayslipsView";
-import { TaxManagementView } from "@/components/hr/TaxManagementView";
 import { ComplaintCategoriesView } from "@/components/hr/ComplaintCategoriesView";
 import { RaiseComplaintView } from "@/components/hr/RaiseComplaintView";
 import { ComplaintListView } from "@/components/hr/ComplaintListView";
@@ -100,7 +99,7 @@ export default async function HumanResourcesPage({
   }
 
   if (slugPath === "payroll/tax-management") {
-    return <TaxManagementView />;
+    redirect("/human-resources/payroll/process-payroll");
   }
 
   if (slugPath === "payroll/payroll-settings") {

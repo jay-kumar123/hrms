@@ -76,7 +76,7 @@ export function DesignationMasterView() {
         ),
       );
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load designations");
       setDesignations([]);
     }
   };

@@ -463,7 +463,7 @@ export function ProfileStatusBadge({
   tone = "emerald",
 }: {
   label: string;
-  tone?: "emerald" | "amber" | "rose" | "violet" | "slate" | "blue";
+  tone?: "emerald" | "amber" | "rose" | "violet" | "slate" | "blue" | "indigo";
 }) {
   const tones = {
     emerald: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -472,6 +472,7 @@ export function ProfileStatusBadge({
     violet: "bg-violet-100 text-violet-800 border-violet-200",
     slate: "bg-slate-100 text-slate-700 border-slate-200",
     blue: "bg-blue-100 text-blue-800 border-blue-200",
+    indigo: "bg-indigo-100 text-indigo-800 border-indigo-200",
   };
 
   return (
@@ -753,18 +754,45 @@ export interface GrievanceItem {
   ticketNo: string;
   subject: string;
   category: string;
+  description?: string;
   date: string;
-  status: "Open" | "Resolved" | "Escalated" | "Closed";
+  priority?: string;
+  status: string;
+  assignedOfficer?: string;
+  assignedRole?: string;
+  investigationNotes?: Array<{
+    id?: string;
+    author?: string;
+    authorRole?: string;
+    timestamp?: string;
+    noteText?: string;
+  }>;
   resolutionNote?: string;
+  timeline?: Array<{
+    id?: string;
+    action?: string;
+    timestamp?: string;
+    user?: string;
+    role?: string;
+    comment?: string;
+  }>;
 }
 
 const GRIEVANCE_STATUS_TONE: Record<
-  GrievanceItem["status"],
-  "emerald" | "amber" | "rose" | "violet" | "slate" | "blue"
+  string,
+  "emerald" | "amber" | "rose" | "violet" | "slate" | "blue" | "indigo"
 > = {
   Open: "amber",
+  "In Review": "indigo",
+  Assigned: "blue",
+  "Under Investigation": "violet",
+  "Action Taken": "indigo",
+  "Pending Level 1 Review": "indigo",
+  "Pending Level 2 Review": "indigo",
+  "Pending Final Approval": "violet",
+  "Resolution Proposed": "emerald",
   Resolved: "emerald",
-  Escalated: "violet",
+  Escalated: "rose",
   Closed: "slate",
 };
 
@@ -788,30 +816,124 @@ export function GrievancesPanel({
   }
 
   return (
-    <ul className="space-y-3">
-      {grievances.map((ticket) => (
-        <li
-          key={ticket.id}
-          className="rounded-lg border border-slate-100 bg-slate-50/60 p-4 space-y-2"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="font-semibold text-slate-900">{ticket.ticketNo}</span>
-              <span className="text-slate-400">·</span>
-              <span className="text-slate-600">{ticket.category}</span>
-              <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500">{ticket.date}</span>
+    <ul className="space-y-4">
+      {grievances.map((ticket) => {
+        const isResolvedOrClosed =
+          ticket.status === "Resolved" || ticket.status === "Closed";
+
+        return (
+          <li
+            key={ticket.id}
+            className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-xs space-y-3"
+          >
+            {/* Top Bar: Ticket No, Category, Date, Status */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md">
+                  {ticket.ticketNo}
+                </span>
+                <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md">
+                  {ticket.category}
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-500">{ticket.date}</span>
+                {ticket.priority && (
+                  <>
+                    <span className="text-slate-400">·</span>
+                    <span
+                      className={cn(
+                        "font-semibold px-2 py-0.5 rounded-md text-[10px]",
+                        ticket.priority === "Critical"
+                          ? "bg-rose-100 text-rose-800"
+                          : ticket.priority === "High"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-slate-100 text-slate-700",
+                      )}
+                    >
+                      {ticket.priority} Priority
+                    </span>
+                  </>
+                )}
+              </div>
+              <ProfileStatusBadge
+                label={ticket.status}
+                tone={GRIEVANCE_STATUS_TONE[ticket.status] || "amber"}
+              />
             </div>
-            <ProfileStatusBadge label={ticket.status} tone={GRIEVANCE_STATUS_TONE[ticket.status]} />
-          </div>
-          <p className="text-sm font-medium text-slate-800">{ticket.subject}</p>
-          {ticket.resolutionNote ? (
-            <p className="text-xs text-slate-600 leading-relaxed rounded-lg bg-white border border-slate-100 px-3 py-2">
-              {ticket.resolutionNote}
-            </p>
-          ) : null}
-        </li>
-      ))}
+
+            {/* Subject & Description */}
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-slate-900">{ticket.subject}</h4>
+              {ticket.description && (
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {ticket.description}
+                </p>
+              )}
+            </div>
+
+            {/* Officer Assignment details */}
+            {ticket.assignedOfficer && (
+              <div className="flex items-center gap-2 text-xs bg-slate-50 rounded-lg px-3 py-1.5 border border-slate-100">
+                <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                <span className="text-slate-500 font-medium">Assigned Officer:</span>
+                <span className="font-semibold text-slate-800">
+                  {ticket.assignedOfficer}{" "}
+                  {ticket.assignedRole ? `(${ticket.assignedRole})` : ""}
+                </span>
+              </div>
+            )}
+
+            {/* Officer Investigation Notes */}
+            {ticket.investigationNotes && ticket.investigationNotes.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                  Officer Investigation Notes ({ticket.investigationNotes.length})
+                </span>
+                <div className="space-y-1.5">
+                  {ticket.investigationNotes.map((note, nIdx) => (
+                    <div
+                      key={note.id || nIdx}
+                      className="rounded-lg bg-blue-50/70 border border-blue-100 p-2.5 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between text-[10px] text-blue-900/80 font-medium">
+                        <span>
+                          {note.author || "Officer"}{" "}
+                          {note.authorRole ? `(${note.authorRole})` : ""}
+                        </span>
+                        <span>{note.timestamp}</span>
+                      </div>
+                      <p className="text-slate-700 leading-relaxed font-medium">
+                        "{note.noteText}"
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Resolution Box */}
+            {ticket.resolutionNote && (
+              <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200/80 p-3 text-xs space-y-1">
+                <div className="flex items-center gap-1.5 text-emerald-900 font-bold">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>Redressal &amp; Resolution Note</span>
+                </div>
+                <p className="text-emerald-950 leading-relaxed pl-5 font-medium">
+                  {ticket.resolutionNote}
+                </p>
+              </div>
+            )}
+
+            {/* Closed without custom note */}
+            {!ticket.resolutionNote && isResolvedOrClosed && (
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-xs text-slate-600 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>This grievance has been officially resolved and closed by HR.</span>
+              </div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

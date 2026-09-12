@@ -149,9 +149,13 @@ export function ComplaintListView() {
     try {
       const [rows, empRows] = await Promise.all([hrComplaintService.list(), hrEmployeeService.list()]);
       const lookup = new Map(empRows.map(mapEmployeeFromApi).map((e) => [e.id, e]));
-      setComplaints(rows.map((row) => mapComplaintFromApi(row, lookup.get(String(row.employeeId)))));
+      setComplaints(
+        rows.map((row) =>
+          mapComplaintFromApi(row, lookup.get(String(row.employeeId || row.employee_id))),
+        ),
+      );
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load complaints");
       setComplaints([]);
     }
   };
@@ -240,7 +244,7 @@ export function ComplaintListView() {
   }, [complaints, searchTerm, selectedDept, selectedCategory, selectedStatus, selectedPriority, selectedOfficer, selectedReviewLevel, selectedSlaStatus]);
 
   // Handlers
-  const handleAssignSubmit = (e: React.FormEvent) => {
+  const handleAssignSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assigningComplaint) return;
 
@@ -256,32 +260,31 @@ export function ComplaintListView() {
       comment: assignNotes ? assignNotes.trim() : undefined,
     };
 
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === assigningComplaint.id
-          ? {
-              ...c,
-              assignedOfficer: assignOfficerObj.name,
-              assignedRole: assignOfficerObj.role,
-              assignedDate: new Date().toLocaleDateString("en-GB"),
-              assignedBy: "Neha Mehta (HR Manager)",
-              status: "Assigned",
-              timeline: [newTimelineEntry, ...c.timeline],
-            }
-          : c
-      )
-    );
+    const updatedTimeline = [newTimelineEntry, ...(assigningComplaint.timeline || [])];
 
-    setAssigningComplaint(null);
-    setAssignNotes("");
-    setToastMessage(`Assigned complaint #${assigningComplaint.ticketNo} to ${assignOfficerObj.name}.`);
+    try {
+      await hrComplaintService.update(assigningComplaint.id, {
+        assignedOfficer: assignOfficerObj.name,
+        assignedRole: assignOfficerObj.role,
+        assignedDate: new Date().toLocaleDateString("en-GB"),
+        assignedBy: "Neha Mehta (HR Manager)",
+        status: "Assigned",
+        timeline: updatedTimeline,
+      });
+      await loadComplaints();
+      setAssigningComplaint(null);
+      setAssignNotes("");
+      setToastMessage(`Assigned complaint #${assigningComplaint.ticketNo} to ${assignOfficerObj.name}.`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to assign complaint");
+    }
   };
 
   const [targetNextStatus, setTargetNextStatus] = useState<"Under Investigation" | "Pending Level 1 Review" | "Resolution Proposed">("Under Investigation");
   const [proposedResolutionInput, setProposedResolutionInput] = useState("");
 
   // Add Investigation Note Submit
-  const handleAddInvestigationNote = (e: React.FormEvent) => {
+  const handleAddInvestigationNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addingNoteComplaint || !newNoteText.trim()) return;
 
@@ -297,7 +300,7 @@ export function ComplaintListView() {
     const nextStatus = targetNextStatus;
 
     // Check if category requires Level 1 approval chain
-    const updatedReviewChain = [...addingNoteComplaint.reviewChain];
+    const updatedReviewChain = [...(addingNoteComplaint.reviewChain || [])];
     if (nextStatus === "Pending Level 1 Review" && updatedReviewChain.length === 0) {
       updatedReviewChain.push({
         levelName: "Level 1 — HR Manager Review",
@@ -317,30 +320,30 @@ export function ComplaintListView() {
       comment: newNoteText.trim(),
     };
 
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === addingNoteComplaint.id
-          ? {
-              ...c,
-              status: nextStatus,
-              investigationNotes: [...c.investigationNotes, newNote],
-              proposedResolution: proposedResolutionInput.trim() || c.proposedResolution,
-              reviewChain: updatedReviewChain,
-              timeline: [timelineEntry, ...c.timeline],
-            }
-          : c
-      )
-    );
+    const updatedNotes = [...(addingNoteComplaint.investigationNotes || []), newNote];
+    const updatedTimeline = [timelineEntry, ...(addingNoteComplaint.timeline || [])];
 
-    setAddingNoteComplaint(null);
-    setNewNoteText("");
-    setProposedResolutionInput("");
-    setTargetNextStatus("Under Investigation");
-    setToastMessage(`Saved investigation note & updated ticket #${addingNoteComplaint.ticketNo} status to ${nextStatus}.`);
+    try {
+      await hrComplaintService.update(addingNoteComplaint.id, {
+        status: nextStatus,
+        investigationNotes: updatedNotes,
+        proposedResolution: proposedResolutionInput.trim() || addingNoteComplaint.proposedResolution,
+        reviewChain: updatedReviewChain,
+        timeline: updatedTimeline,
+      });
+      await loadComplaints();
+      setAddingNoteComplaint(null);
+      setNewNoteText("");
+      setProposedResolutionInput("");
+      setTargetNextStatus("Under Investigation");
+      setToastMessage(`Saved investigation note & updated ticket #${addingNoteComplaint.ticketNo} status to ${nextStatus}.`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to save investigation note");
+    }
   };
 
   // Review Decision Submit (Approve / Return / Escalate / Reject)
-  const handleReviewSubmit = (e: React.FormEvent) => {
+  const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reviewingComplaint || !reviewComment.trim()) return;
 
@@ -375,7 +378,7 @@ export function ComplaintListView() {
     };
 
     // Update review chain state
-    const updatedChain = reviewingComplaint.reviewChain.map((step) => {
+    const updatedChain = (reviewingComplaint.reviewChain || []).map((step) => {
       if (step.status === "Pending") {
         return {
           ...step,
@@ -387,22 +390,42 @@ export function ComplaintListView() {
       return step;
     });
 
-    setComplaints((prev) =>
-      prev.map((c) =>
-        c.id === reviewingComplaint.id
-          ? {
-              ...c,
-              status: nextStatus,
-              reviewChain: updatedChain,
-              timeline: [timelineEntry, ...c.timeline],
-            }
-          : c
-      )
-    );
+    const updatedTimeline = [timelineEntry, ...(reviewingComplaint.timeline || [])];
 
-    setReviewingComplaint(null);
-    setReviewComment("");
-    setToastMessage(`Updated ticket #${reviewingComplaint.ticketNo} status to ${nextStatus}.`);
+    try {
+      await hrComplaintService.update(reviewingComplaint.id, {
+        status: nextStatus,
+        reviewChain: updatedChain,
+        timeline: updatedTimeline,
+        resolutionNotes: nextStatus === "Resolved" ? (reviewComment.trim() || reviewingComplaint.resolutionNotes) : reviewingComplaint.resolutionNotes,
+      });
+      await loadComplaints();
+      setReviewingComplaint(null);
+      setReviewComment("");
+      setToastMessage(`Updated ticket #${reviewingComplaint.ticketNo} status to ${nextStatus}.`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to update review decision");
+    }
+  };
+
+  const handleQuickResolve = async (c: ComplaintRecord) => {
+    try {
+      await hrComplaintService.update(c.id, { status: "Resolved" });
+      await loadComplaints();
+      setToastMessage(`Marked ticket #${c.ticketNo} as Resolved.`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to resolve ticket");
+    }
+  };
+
+  const handleQuickClose = async (c: ComplaintRecord) => {
+    try {
+      await hrComplaintService.update(c.id, { status: "Closed" });
+      await loadComplaints();
+      setToastMessage(`Closed grievance ticket #${c.ticketNo}.`);
+    } catch (err) {
+      setToastMessage(err instanceof Error ? err.message : "Failed to close ticket");
+    }
   };
 
   return (
@@ -737,12 +760,7 @@ export function ComplaintListView() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                setComplaints((prev) =>
-                                  prev.map((item) => (item.id === c.id ? { ...item, status: "Resolved" } : item))
-                                );
-                                setToastMessage(`Marked ticket #${c.ticketNo} as Resolved.`);
-                              }}
+                              onClick={() => void handleQuickResolve(c)}
                               className="rounded-xl text-xs font-semibold text-emerald-800 border-emerald-300 hover:bg-emerald-50"
                             >
                               <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Resolve Ticket
@@ -755,12 +773,7 @@ export function ComplaintListView() {
                               type="button"
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                setComplaints((prev) =>
-                                  prev.map((item) => (item.id === c.id ? { ...item, status: "Closed" } : item))
-                                );
-                                setToastMessage(`Closed grievance ticket #${c.ticketNo}.`);
-                              }}
+                              onClick={() => void handleQuickClose(c)}
                               className="rounded-xl text-xs font-semibold text-slate-800 border-slate-300 hover:bg-slate-100"
                             >
                               <Lock className="h-3.5 w-3.5 mr-1 text-slate-600" /> Close Ticket

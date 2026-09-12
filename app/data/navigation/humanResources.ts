@@ -23,7 +23,6 @@ export const humanResourcesNavItems: ModuleNavItem[] = [
     children: [
       { label: "Process Payroll", href: "/human-resources/payroll/process-payroll", icon: "credit-card" },
       { label: "Salary Structure", href: "/human-resources/payroll/salary-structure", icon: "layers" },
-      { label: "Tax Management", href: "/human-resources/payroll/tax-management", icon: "percent" },
       { label: "Payslips", href: "/human-resources/payroll/payslips", icon: "file-spreadsheet" },
       { label: "Payroll Settings", href: "/human-resources/payroll/payroll-settings", icon: "settings" },
     ],

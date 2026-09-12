@@ -45,7 +45,19 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { ModulePageShell } from "@/components/pms";
 import type { EmployeeItem } from "@/app/data/hr/employeeListData";
-import { hrEmployeeService } from "@/services/human-resources";
+import {
+  hrEmployeeService,
+  hrDepartmentService,
+  hrDesignationService,
+  hrEmploymentTypeService,
+  hrShiftTypeService,
+  hrShiftAssignmentService,
+  hrWeeklyOffService,
+  hrLeaveApplicationService,
+  hrOvertimeService,
+  hrAttendanceService,
+  hrComplaintService,
+} from "@/services/human-resources";
 import { mapEmployeeFromApi } from "@/lib/hr/api-mappers";
 import { EmployeeAttendanceGrid } from "@/components/hr/shared/EmployeeAttendanceGrid";
 import { EmployeeLeaveTab } from "@/components/hr/shared/EmployeeLeaveTab";
@@ -125,13 +137,20 @@ function ProfileHighlightBadge({
   );
 }
 
-function EmployeeProfileSummaryCard({ employee }: { employee: EmployeeItem }) {
+function EmployeeProfileSummaryCard({
+  employee,
+  weeklyOffText,
+}: {
+  employee: EmployeeItem;
+  weeklyOffText?: string;
+}) {
   const isActive = employee.status === "Active";
 
   const stats = [
     { label: "Manager", value: employee.reportingManager || "—", icon: User, tone: "slate" as const },
     { label: "Joined", value: employee.joinDate, icon: Calendar, tone: "slate" as const },
     { label: "Employment", value: employee.employmentType, icon: Briefcase, tone: "emerald" as const },
+    { label: "Weekly off", value: weeklyOffText || "Sunday", icon: Calendar, tone: "violet" as const },
     {
       label: "Status",
       value: employee.status,
@@ -330,10 +349,16 @@ function EmployeeProfileQuickMetrics({ employee }: { employee: EmployeeItem }) {
   );
 }
 
-function EmployeeProfileHeader({ employee }: { employee: EmployeeItem }) {
+function EmployeeProfileHeader({
+  employee,
+  weeklyOffText,
+}: {
+  employee: EmployeeItem;
+  weeklyOffText?: string;
+}) {
   return (
     <div className="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(240px,280px)]">
-      <EmployeeProfileSummaryCard employee={employee} />
+      <EmployeeProfileSummaryCard employee={employee} weeklyOffText={weeklyOffText} />
       <EmployeeProfileQuickMetrics employee={employee} />
     </div>
   );
@@ -483,48 +508,7 @@ interface ActivityLogItem {
   description: string;
 }
 
-const SAMPLE_ACTIVITIES: ActivityLogItem[] = [
-  {
-    id: "act-1",
-    timestamp: "Today at 09:15 AM",
-    category: "Attendance",
-    timeframe: "Today",
-    actor: "Biometric System",
-    description: "In-punch recorded at Main Entrance Gate (09:14:22 AM).",
-  },
-  {
-    id: "act-2",
-    timestamp: "Yesterday at 04:30 PM",
-    category: "Leave",
-    timeframe: "Yesterday",
-    actor: "Rajesh Kumar (Employee)",
-    description: "Submitted Casual Leave request for 18 Aug 2026 (1 Day).",
-  },
-  {
-    id: "act-3",
-    timestamp: "01 Aug 2026",
-    category: "Payroll",
-    timeframe: "Last Week",
-    actor: "HR Payroll Admin",
-    description: "July 2026 Payslip generated and delivered via Email.",
-  },
-  {
-    id: "act-4",
-    timestamp: "28 Jul 2026",
-    category: "Documents",
-    timeframe: "Last Week",
-    actor: "Neha Mehta (HR Admin)",
-    description: "Verified Form 16 Tax Declaration submission.",
-  },
-  {
-    id: "act-5",
-    timestamp: "15 Jul 2026",
-    category: "Profile",
-    timeframe: "Older",
-    actor: "Vikram Malhotra (GM)",
-    description: "Updated Designation to Front Desk Manager.",
-  },
-];
+
 
 export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string }) {
   const [employees, setEmployees] = useState<EmployeeItem[]>([]);
@@ -543,14 +527,90 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
   const [isComboboxOpen, setIsComboboxOpen] = useState(false);
   const comboboxRef = useRef<HTMLDivElement>(null);
 
+  const [shiftAssignments, setShiftAssignments] = useState<Record<string, unknown>[]>([]);
+  const [weeklyOffs, setWeeklyOffs] = useState<Record<string, unknown>[]>([]);
+  const [leaveApplications, setLeaveApplications] = useState<Record<string, unknown>[]>([]);
+  const [overtimeRecords, setOvertimeRecords] = useState<Record<string, unknown>[]>([]);
+  const [employeeAttendance, setEmployeeAttendance] = useState<Record<string, unknown>[]>([]);
+  const [complaints, setComplaints] = useState<Record<string, unknown>[]>([]);
+
   const reloadEmployees = useCallback(async () => {
     try {
-      const rows = await hrEmployeeService.list();
-      const mapped = rows.map(mapEmployeeFromApi);
+      const [
+        rows,
+        deptRows,
+        desigRows,
+        empTypeRows,
+        shiftRows,
+        assignRows,
+        woRows,
+        leaveRows,
+        otRows,
+        compRows,
+      ] = await Promise.all([
+        hrEmployeeService.list().catch(() => []),
+        hrDepartmentService.list().catch(() => []),
+        hrDesignationService.list().catch(() => []),
+        hrEmploymentTypeService.list().catch(() => []),
+        hrShiftTypeService.list().catch(() => []),
+        hrShiftAssignmentService.list().catch(() => []),
+        hrWeeklyOffService.list().catch(() => []),
+        hrLeaveApplicationService.list().catch(() => []),
+        hrOvertimeService.list().catch(() => []),
+        hrComplaintService.list().catch(() => []),
+      ]);
+      setShiftAssignments(assignRows as Record<string, unknown>[]);
+      setWeeklyOffs(woRows as Record<string, unknown>[]);
+      setLeaveApplications(leaveRows as Record<string, unknown>[]);
+      setOvertimeRecords(otRows as Record<string, unknown>[]);
+      setComplaints(compRows as Record<string, unknown>[]);
+
+      const deptMap = new Map((deptRows as Record<string, unknown>[]).map((d) => [
+        String(d.id),
+        String(d.departmentName || d.department_name || d.name || d.dept_name || "").trim(),
+      ]));
+      const desigMap = new Map((desigRows as Record<string, unknown>[]).map((d) => [
+        String(d.id),
+        String(d.designationTitle || d.designation_title || d.designationName || d.designation_name || d.title || d.name || "").trim(),
+      ]));
+      const empTypeMap = new Map((empTypeRows as Record<string, unknown>[]).map((t) => [
+        String(t.id),
+        String(t.typeName || t.type_name || t.name || t.workingTerm || "").trim(),
+      ]));
+      const shiftMap = new Map((shiftRows as Record<string, unknown>[]).map((s) => [
+        String(s.id),
+        String(s.shiftName || s.shift_name || s.name || "").trim(),
+      ]));
+
+      const isUuid = (val?: string) =>
+        typeof val === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+
+      const mapped = (rows as Record<string, unknown>[]).map((r) => {
+        const emp = mapEmployeeFromApi(r);
+        const rawDeptId = String(r.departmentId || r.department_id || "");
+        const rawDesigId = String(r.designationId || r.designation_id || "");
+        const rawEmpTypeId = String(r.employmentTypeId || r.employment_type_id || "");
+        const rawShiftId = String(r.shiftTypeId || r.shift_type_id || "");
+
+        if (!emp.department || isUuid(emp.department)) {
+          emp.department = (isUuid(emp.department) ? deptMap.get(emp.department) : "") || deptMap.get(rawDeptId) || (isUuid(emp.department) ? "" : emp.department) || "General";
+        }
+        if (!emp.designation || isUuid(emp.designation)) {
+          emp.designation = (isUuid(emp.designation) ? desigMap.get(emp.designation) : "") || desigMap.get(rawDesigId) || (isUuid(emp.designation) ? "" : emp.designation) || "Staff";
+        }
+        if (!emp.employmentType || isUuid(emp.employmentType)) {
+          emp.employmentType = ((isUuid(emp.employmentType) ? empTypeMap.get(emp.employmentType) : "") || empTypeMap.get(rawEmpTypeId) || (isUuid(emp.employmentType) ? "Permanent" : emp.employmentType) || "Permanent") as EmployeeItem["employmentType"];
+        }
+        if (!emp.shiftType || isUuid(emp.shiftType)) {
+          emp.shiftType = ((isUuid(emp.shiftType) ? shiftMap.get(emp.shiftType) : "") || shiftMap.get(rawShiftId) || (isUuid(emp.shiftType) ? "General Shift" : emp.shiftType) || "General Shift") as EmployeeItem["shiftType"];
+        }
+        return emp;
+      });
+
       setEmployees(mapped);
       return mapped;
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load employees");
       setEmployees([]);
       return [];
     }
@@ -569,6 +629,129 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
 
   // Active Selected Employee
   const employee = selectedEmpId ? employees.find((e) => e.id === selectedEmpId) || null : null;
+
+  // Fetch real punch logs for selected employee
+  useEffect(() => {
+    if (!employee?.id) {
+      setEmployeeAttendance([]);
+      return;
+    }
+    let cancelled = false;
+    hrAttendanceService
+      .getForEmployee(employee.id)
+      .then((rows) => {
+        if (!cancelled && Array.isArray(rows)) {
+          setEmployeeAttendance(rows as Record<string, unknown>[]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEmployeeAttendance([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employee?.id, attendanceRefreshKey]);
+
+  // Active Weekly Off
+  const activeWeeklyOff = useMemo(() => {
+    if (!employee) return "Sunday";
+    const matched = weeklyOffs.filter((wo) => {
+      const empId = String(wo.employeeId || wo.employee_id || "");
+      return empId === employee.id;
+    });
+    if (matched.length > 0) {
+      const latest = matched[matched.length - 1];
+      return String(latest.weeklyOffDay || latest.weekly_off_day || latest.day || "Sunday");
+    }
+    return "Sunday";
+  }, [employee, weeklyOffs]);
+
+  // Upcoming Shift Change for active employee
+  const upcomingShiftChange = useMemo(() => {
+    if (!employee) return null;
+    const todayIso = new Date().toISOString().split("T")[0];
+    const upcoming = shiftAssignments.filter((sa) => {
+      const empId = String(sa.employeeId || sa.employee_id || "");
+      if (empId !== employee.id) return false;
+      const from = String(sa.effectiveFrom || sa.effective_from || "").slice(0, 10);
+      const status = String(sa.status || "");
+      return status.toLowerCase() === "upcoming" || (from && from > todayIso);
+    });
+    return upcoming[0] || null;
+  }, [employee, shiftAssignments]);
+
+  useEffect(() => {
+    if (activeTab === "grievances" || activeTab === "activity") {
+      void reloadEmployees();
+    }
+  }, [activeTab, reloadEmployees]);
+
+  // Dynamic Grievances for active employee
+  const employeeGrievances = useMemo(() => {
+    if (!employee) return [];
+    return complaints
+      .filter((c) => String(c.employeeId || c.employee_id || "") === employee.id)
+      .map((c, idx) => {
+        const ticketNo = String(c.ticketNo || c.ticket_no || `#TCK-${c.id || idx + 1}`);
+        const subject = String(c.subject || c.title || "Grievance");
+        const category = String(c.category || "General");
+        const description = String(c.description || "");
+        const priority = String(c.priority || "Medium");
+        const rawDate = String(
+          c.incidentDate ||
+            c.incident_date ||
+            c.submittedDate ||
+            c.submitted_date ||
+            c.createdAt ||
+            c.created_at ||
+            "",
+        );
+        const date = rawDate ? rawDate.slice(0, 10) : new Date().toISOString().slice(0, 10);
+        const status = String(c.status || "Open");
+        const assignedOfficer = (c.assignedOfficer ?? c.assigned_officer) as string | undefined;
+        const assignedRole = (c.assignedRole ?? c.assigned_role) as string | undefined;
+        const investigationNotes = (c.investigationNotes ??
+          c.investigation_notes ??
+          []) as Array<{
+          id?: string;
+          author?: string;
+          authorRole?: string;
+          timestamp?: string;
+          noteText?: string;
+        }>;
+        const resolutionNote = String(
+          c.resolutionNotes ||
+            c.resolution_notes ||
+            c.proposedResolution ||
+            c.proposed_resolution ||
+            "",
+        );
+        const timeline = (c.timeline ?? []) as Array<{
+          id?: string;
+          action?: string;
+          timestamp?: string;
+          user?: string;
+          role?: string;
+          comment?: string;
+        }>;
+
+        return {
+          id: String(c.id || idx),
+          ticketNo,
+          subject,
+          category,
+          description: description || undefined,
+          date,
+          priority,
+          status,
+          assignedOfficer,
+          assignedRole,
+          investigationNotes,
+          resolutionNote: resolutionNote || undefined,
+          timeline,
+        };
+      });
+  }, [employee, complaints]);
 
   // Search results
   const searchResults = useMemo(() => {
@@ -611,14 +794,214 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
     });
   }, []);
 
-  // Filtered Activity Logs
+  // Filtered Dynamic Activity Logs from real records
   const filteredActivities = useMemo(() => {
-    return SAMPLE_ACTIVITIES.filter((item) => {
+    if (!employee) return [];
+
+    interface RawActivityItem {
+      id: string;
+      rawDate: string;
+      timestamp: string;
+      category: "Attendance" | "Leave" | "Payroll" | "Documents" | "Profile";
+      timeframe: "Today" | "Yesterday" | "Last Week" | "Older";
+      actor: string;
+      description: string;
+    }
+
+    const getTimeframe = (dateStr?: string): "Today" | "Yesterday" | "Last Week" | "Older" => {
+      if (!dateStr) return "Older";
+      try {
+        const clean = dateStr.slice(0, 10);
+        const d = new Date(clean + "T00:00:00");
+        if (isNaN(d.getTime())) return "Older";
+        const now = new Date();
+        const todayZero = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const diffDays = Math.floor((todayZero.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 0) return "Today";
+        if (diffDays === 1) return "Yesterday";
+        if (diffDays <= 7) return "Last Week";
+        return "Older";
+      } catch {
+        return "Older";
+      }
+    };
+
+    const formatDisplayDate = (dateStr?: string): string => {
+      if (!dateStr) return "—";
+      try {
+        const clean = dateStr.slice(0, 10);
+        const d = new Date(clean + "T00:00:00");
+        if (isNaN(d.getTime())) return dateStr;
+        return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+      } catch {
+        return dateStr;
+      }
+    };
+
+    const activities: RawActivityItem[] = [];
+
+    // 1. Profile Onboarding Activity
+    if (employee.joinDate) {
+      activities.push({
+        id: `act-onboard-${employee.id}`,
+        rawDate: employee.joinDate,
+        timestamp: `Joined on ${formatDisplayDate(employee.joinDate)}`,
+        category: "Profile",
+        timeframe: getTimeframe(employee.joinDate),
+        actor: "HR Department",
+        description: `Onboarded as ${employee.designation} (${employee.employmentType}) in ${employee.department} department. Reporting to ${employee.reportingManager || "Department Head"}.`,
+      });
+    }
+
+    // 2. Weekly Off Assignments
+    weeklyOffs
+      .filter((wo) => String(wo.employeeId || wo.employee_id || "") === employee.id)
+      .forEach((wo, idx) => {
+        const day = String(wo.weeklyOffDay || wo.weekly_off_day || wo.day || "Weekly Off");
+        const from = String(wo.effectiveFrom || wo.effective_from || "");
+        const to = String(wo.effectiveTo || wo.effective_to || "");
+        const createdAt = String(wo.createdAt || wo.created_at || from || "");
+        const assignedBy = String(wo.assignedBy || wo.assigned_by || "HR Administrator");
+        activities.push({
+          id: `act-wo-${wo.id || idx}`,
+          rawDate: createdAt || from,
+          timestamp: from ? `Effective ${formatDisplayDate(from)}` : "Active",
+          category: "Attendance",
+          timeframe: getTimeframe(createdAt || from),
+          actor: assignedBy,
+          description: `Assigned ${day} as regular weekly off${to ? ` (Valid till ${formatDisplayDate(to)})` : " (Ongoing)"}.`,
+        });
+      });
+
+    // 3. Shift Assignments
+    shiftAssignments
+      .filter((sa) => String(sa.employeeId || sa.employee_id || "") === employee.id)
+      .forEach((sa, idx) => {
+        const shiftName = String(sa.shiftName || sa.shift_name || sa.shiftType || "Shift");
+        const from = String(sa.effectiveFrom || sa.effective_from || "");
+        const to = String(sa.effectiveTo || sa.effective_to || "");
+        const createdAt = String(sa.createdAt || sa.created_at || from || "");
+        const assignedBy = String(sa.assignedBy || sa.assigned_by || "HR Administrator");
+        const isUpcoming = sa.status === "Upcoming" || (from && from > new Date().toISOString().split("T")[0]);
+        activities.push({
+          id: `act-sa-${sa.id || idx}`,
+          rawDate: createdAt || from,
+          timestamp: from ? `Effective ${formatDisplayDate(from)}` : "Roster",
+          category: "Attendance",
+          timeframe: getTimeframe(createdAt || from),
+          actor: assignedBy,
+          description: isUpcoming
+            ? `Shift scheduled to change to ${shiftName} (Effective: ${formatDisplayDate(from)} to ${to ? formatDisplayDate(to) : "Ongoing"}).`
+            : `Assigned to ${shiftName} (${formatDisplayDate(from)}${to ? ` to ${formatDisplayDate(to)}` : " onwards"}).`,
+        });
+      });
+
+    // 4. Leave Applications
+    leaveApplications
+      .filter((la) => String(la.employeeId || la.employee_id || "") === employee.id)
+      .forEach((la, idx) => {
+        const leaveType = String(la.leaveTypeName || la.leave_type_name || la.leaveType || "Leave");
+        const from = String(la.fromDate || la.from_date || "");
+        const to = String(la.toDate || la.to_date || "");
+        const days = la.totalDays || la.total_days || 1;
+        const status = String(la.status || "Pending");
+        const reason = la.reason ? ` - Reason: "${la.reason}"` : "";
+        const createdAt = String(la.createdAt || la.created_at || from || "");
+        const appliedBy = String(la.appliedBy || la.applied_by || employee.name);
+        activities.push({
+          id: `act-leave-${la.id || idx}`,
+          rawDate: createdAt || from,
+          timestamp: from ? `${formatDisplayDate(from)}${to && to !== from ? ` to ${formatDisplayDate(to)}` : ""}` : "Leave",
+          category: "Leave",
+          timeframe: getTimeframe(createdAt || from),
+          actor: appliedBy,
+          description: `${leaveType} application (${days} day${Number(days) > 1 ? "s" : ""}) [Status: ${status}]${reason}`,
+        });
+      });
+
+    // 5. Overtime Records
+    overtimeRecords
+      .filter((ot) => String(ot.employeeId || ot.employee_id || "") === employee.id)
+      .forEach((ot, idx) => {
+        const date = String(ot.overtimeDate || ot.overtime_date || ot.date || "");
+        const hours = ot.overtimeHours || ot.overtime_hours || ot.hours || 0;
+        const status = String(ot.status || "Pending");
+        const reason = ot.reason ? ` (${ot.reason})` : "";
+        const createdAt = String(ot.createdAt || ot.created_at || date || "");
+        const recordedBy = String(ot.recordedBy || ot.recorded_by || "HR Administrator");
+        activities.push({
+          id: `act-ot-${ot.id || idx}`,
+          rawDate: createdAt || date,
+          timestamp: date ? formatDisplayDate(date) : "Overtime",
+          category: "Payroll",
+          timeframe: getTimeframe(createdAt || date),
+          actor: recordedBy,
+          description: `Overtime claim: ${hours} hour(s) [Status: ${status}]${reason}`,
+        });
+      });
+
+    // 6. Attendance Punch Logs
+    employeeAttendance.forEach((att, idx) => {
+      const date = String(att.attendanceDate || att.attendance_date || att.date || "");
+      const status = String(att.attendanceStatus || att.attendance_status || att.status || "Present");
+      const inTime = att.punchInTime || att.punch_in || att.punchInAt || "";
+      const outTime = att.punchOutTime || att.punch_out || att.punchOutAt || "";
+      const punchDetails = inTime || outTime ? ` (In: ${inTime || "—"} | Out: ${outTime || "—"})` : "";
+      const createdAt = String(att.createdAt || att.created_at || date || "");
+      const source = String(att.source || att.markedBy || "Attendance System");
+      activities.push({
+        id: `act-att-${att.id || idx}`,
+        rawDate: date || createdAt,
+        timestamp: date ? formatDisplayDate(date) : "Daily Log",
+        category: "Attendance",
+        timeframe: getTimeframe(date || createdAt),
+        actor: source,
+        description: `Daily attendance logged: ${status}${punchDetails}`,
+      });
+    });
+
+    // 7. Complaints / Grievances
+    complaints
+      .filter((c) => String(c.employeeId || c.employee_id || "") === employee.id)
+      .forEach((c, idx) => {
+        const ticket = c.ticketNo || c.ticket_no || `#GR-${idx + 1}`;
+        const title = c.subject || c.title || c.category || "Grievance Ticket";
+        const status = String(c.status || "Open");
+        const createdAt = String(c.createdAt || c.created_at || c.date || "");
+        activities.push({
+          id: `act-comp-${c.id || idx}`,
+          rawDate: createdAt,
+          timestamp: createdAt ? formatDisplayDate(createdAt) : "Grievance",
+          category: "Profile",
+          timeframe: getTimeframe(createdAt),
+          actor: "HR Grievance Cell",
+          description: `Grievance ticket ${ticket}: ${title} [Status: ${status}]`,
+        });
+      });
+
+    // Sort descending by rawDate
+    activities.sort((a, b) => {
+      const dateA = a.rawDate ? new Date(a.rawDate).getTime() : 0;
+      const dateB = b.rawDate ? new Date(b.rawDate).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return activities.filter((item) => {
       const matchCat = activityCategoryFilter === "ALL" || item.category === activityCategoryFilter;
       const matchTime = activityTimeframeFilter === "ALL" || item.timeframe === activityTimeframeFilter;
       return matchCat && matchTime;
     });
-  }, [activityCategoryFilter, activityTimeframeFilter]);
+  }, [
+    employee,
+    weeklyOffs,
+    shiftAssignments,
+    leaveApplications,
+    overtimeRecords,
+    employeeAttendance,
+    complaints,
+    activityCategoryFilter,
+    activityTimeframeFilter,
+  ]);
 
   // Helper for Status Badges
   const renderDocStatusBadge = (status: CategorizedDoc["status"]) => {
@@ -672,7 +1055,11 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
     <ModulePageShell
       eyebrow="Human Resource / Employees"
       title={employee ? "" : "Employee profile"}
-      aboveTable={employee ? <EmployeeProfileHeader employee={employee} /> : undefined}
+      aboveTable={
+        employee ? (
+          <EmployeeProfileHeader employee={employee} weeklyOffText={activeWeeklyOff} />
+        ) : undefined
+      }
       breadcrumbs={[
         { label: "Human Resource", href: "/human-resources/dashboard" },
         { label: "Employees", href: "/human-resources/employees/list" },
@@ -898,6 +1285,42 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
 
           {/* TAB PANELS CONTAINER */}
           <div ref={tabPanelRef} className="space-y-5 scroll-mt-24">
+            {upcomingShiftChange && (
+              <div className="rounded-2xl border border-amber-200/90 bg-gradient-to-r from-amber-50/90 via-amber-50/50 to-white p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900 animate-in fade-in">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800 font-bold border border-amber-300">
+                    <Clock className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 font-extrabold text-[10px] tracking-wide uppercase border border-amber-300">
+                        Upcoming Shift Change
+                      </span>
+                      <span className="font-bold text-slate-900">
+                        {String(upcomingShiftChange.shiftName || upcomingShiftChange.shift_name || "New Shift")}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-600">
+                      Effective from{" "}
+                      <strong className="font-semibold text-slate-900">
+                        {String(upcomingShiftChange.effectiveFrom || upcomingShiftChange.effective_from)}
+                      </strong>{" "}
+                      to{" "}
+                      <strong className="font-semibold text-slate-900">
+                        {String(upcomingShiftChange.effectiveTo || upcomingShiftChange.effective_to || "Until Further Notice")}
+                      </strong>
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href="/human-resources/attendance-leave/shift-management"
+                  className="inline-flex items-center gap-1 font-bold text-amber-800 hover:text-amber-950 hover:underline shrink-0 text-[11px]"
+                >
+                  Manage Shifts →
+                </a>
+              </div>
+            )}
+
             {/* ─────────────────────────────────────────────────────────────
                 SECTION 3: TAB 1 - OVERVIEW & PERSONAL (Expanded)
             ───────────────────────────────────────────────────────────── */}
@@ -1022,7 +1445,7 @@ export function EmployeeProfileView({ initialEmpId }: { initialEmpId?: string })
               <div role="tabpanel">
                 <ProfileCard title="Grievances" className="animate-in fade-in duration-200">
                   <GrievancesPanel
-                    grievances={SAMPLE_GRIEVANCES[employee.id] ?? []}
+                    grievances={employeeGrievances}
                     employeeName={employee.name}
                   />
                 </ProfileCard>

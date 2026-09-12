@@ -138,12 +138,10 @@ function generateWorkingDay(
   date: Date,
   shiftType: string,
 ): Omit<EmployeeAttendanceDay, "iso" | "day" | "label" | "inMonth"> {
-  const iso = toIso(date);
-  const seed = hashSeed(`${employeeId}-${iso}`);
-  const roll = seed % 100;
   const dow = date.getDay();
 
-  if (dow === 0 || (dow === 6 && seed % 4 === 0)) {
+  // Default Sunday to Weekly Off
+  if (dow === 0) {
     return {
       status: "Weekly Off",
       shift: "Weekly Off",
@@ -153,44 +151,13 @@ function generateWorkingDay(
     };
   }
 
-  if (roll < 4) {
-    return {
-      status: "Absent",
-      shift: shiftType,
-      checkIn: "-",
-      checkOut: "-",
-      workedHours: 0,
-    };
-  }
-
-  if (roll < 9) {
-    return {
-      status: "On Leave",
-      shift: "Leave",
-      checkIn: "-",
-      checkOut: "-",
-      workedHours: 0,
-    };
-  }
-
-  if (roll < 12) {
-    return {
-      status: "Half Day",
-      shift: shiftType,
-      checkIn: "09:05 AM",
-      checkOut: "01:10 PM",
-      workedHours: 4,
-    };
-  }
-
-  const isLate = roll < 20;
-  const workedHours = isLate ? 8 + (seed % 3) * 0.1 : 8 + (seed % 5) * 0.1;
+  // Without a manual or biometric punch, attendance status is Pending with no fake punch times
   return {
-    status: isLate ? "Late" : "Present",
+    status: "Pending",
     shift: shiftType,
-    checkIn: isLate ? "09:12 AM" : "08:5" + (seed % 9) + " AM",
-    checkOut: "05:0" + (seed % 6) + " PM",
-    workedHours: Math.round(workedHours * 10) / 10,
+    checkIn: "-",
+    checkOut: "-",
+    workedHours: 0,
   };
 }
 
@@ -623,7 +590,7 @@ export function getHeatmapCellClass(status: EmployeeAttendanceStatus): string {
     case "On Leave":
       return "bg-sky-400 hover:ring-2 hover:ring-sky-300 hover:ring-offset-1";
     case "Holiday":
-      return "bg-violet-400 hover:ring-2 hover:ring-violet-300 hover:ring-offset-1";
+      return "bg-violet-600 hover:ring-2 hover:ring-violet-400 hover:ring-offset-1 text-white";
     case "Absent":
       return "bg-rose-400 hover:ring-2 hover:ring-rose-300 hover:ring-offset-1";
     case "Pending":
@@ -652,7 +619,7 @@ export function getCalendarCellClass(
     case "On Leave":
       return "bg-sky-300 text-sky-950";
     case "Holiday":
-      return "bg-violet-300 text-violet-950";
+      return "bg-violet-600 text-white font-bold shadow-xs";
     case "Absent":
       return "bg-rose-300 text-rose-950";
     case "Pending":

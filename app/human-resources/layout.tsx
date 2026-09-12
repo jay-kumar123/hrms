@@ -11,7 +11,7 @@ export default function HumanResourcesLayout({
 }) {
   return (
     <AppShell
-      navItems={navItems}
+      hideTopNav
       user={currentUser}
       subNav={<HumanResourcesSubNav />}
       moduleSidebar={

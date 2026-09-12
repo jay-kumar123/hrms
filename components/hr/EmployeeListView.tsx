@@ -24,7 +24,13 @@ import {
 import { DropdownSelect } from "@/components/ui/DropdownSelect";
 import { ModulePageShell } from "@/components/pms";
 import { EmployeeStatusBadge } from "@/components/hr/shared/EmployeeStatusBadge";
-import { hrEmployeeService } from "@/services/human-resources";
+import {
+  hrEmployeeService,
+  hrDepartmentService,
+  hrDesignationService,
+  hrEmploymentTypeService,
+  hrShiftTypeService,
+} from "@/services/human-resources";
 import { mapEmployeeFromApi } from "@/lib/hr/api-mappers";
 import type { EmployeeItem } from "@/app/data/hr/employeeListData";
 import { employeeDepartmentFilterOptions } from "@/app/data/hr/employeeDepartmentOptions";
@@ -192,11 +198,60 @@ export function EmployeeListView() {
     (async () => {
       setLoading(true);
       try {
-        const rows = await hrEmployeeService.list();
-        if (!cancelled) setEmployees(rows.map(mapEmployeeFromApi));
+        const [rows, deptRows, desigRows, empTypeRows, shiftRows] = await Promise.all([
+          hrEmployeeService.list(),
+          hrDepartmentService.list().catch(() => []),
+          hrDesignationService.list().catch(() => []),
+          hrEmploymentTypeService.list().catch(() => []),
+          hrShiftTypeService.list().catch(() => []),
+        ]);
+
+        const deptMap = new Map((deptRows as Record<string, unknown>[]).map((d) => [
+          String(d.id),
+          String(d.departmentName || d.name || d.department_name || "").trim(),
+        ]));
+        const desigMap = new Map((desigRows as Record<string, unknown>[]).map((d) => [
+          String(d.id),
+          String(d.designationTitle || d.designationName || d.designation_title || d.designation_name || d.title || d.name || "").trim(),
+        ]));
+        const empTypeMap = new Map((empTypeRows as Record<string, unknown>[]).map((t) => [
+          String(t.id),
+          String(t.typeName || t.type_name || t.name || t.workingTerm || "").trim(),
+        ]));
+        const shiftMap = new Map((shiftRows as Record<string, unknown>[]).map((s) => [
+          String(s.id),
+          String(s.shiftName || s.shift_name || s.name || "").trim(),
+        ]));
+
+        const isUuid = (val?: string) =>
+          typeof val === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+
+        const mapped = (rows as Record<string, unknown>[]).map((r) => {
+          const emp = mapEmployeeFromApi(r);
+          const rawDeptId = String(r.departmentId || r.department_id || "");
+          const rawDesigId = String(r.designationId || r.designation_id || "");
+          const rawEmpTypeId = String(r.employmentTypeId || r.employment_type_id || "");
+          const rawShiftId = String(r.shiftTypeId || r.shift_type_id || "");
+
+          if (!emp.department || isUuid(emp.department)) {
+            emp.department = (isUuid(emp.department) ? deptMap.get(emp.department) : "") || deptMap.get(rawDeptId) || (isUuid(emp.department) ? "" : emp.department) || "General";
+          }
+          if (!emp.designation || isUuid(emp.designation)) {
+            emp.designation = (isUuid(emp.designation) ? desigMap.get(emp.designation) : "") || desigMap.get(rawDesigId) || (isUuid(emp.designation) ? "" : emp.designation) || "Staff";
+          }
+          if (!emp.employmentType || isUuid(emp.employmentType)) {
+            emp.employmentType = ((isUuid(emp.employmentType) ? empTypeMap.get(emp.employmentType) : "") || empTypeMap.get(rawEmpTypeId) || (isUuid(emp.employmentType) ? "Permanent" : emp.employmentType) || "Permanent") as EmployeeItem["employmentType"];
+          }
+          if (!emp.shiftType || isUuid(emp.shiftType)) {
+            emp.shiftType = ((isUuid(emp.shiftType) ? shiftMap.get(emp.shiftType) : "") || shiftMap.get(rawShiftId) || (isUuid(emp.shiftType) ? "General Shift" : emp.shiftType) || "General Shift") as EmployeeItem["shiftType"];
+          }
+          return emp;
+        });
+
+        if (!cancelled) setEmployees(mapped);
       } catch (e) {
         if (!cancelled) {
-          console.warn(e);
+          setToastMessage(e instanceof Error ? e.message : "Failed to load employees");
           setEmployees([]);
         }
       } finally {

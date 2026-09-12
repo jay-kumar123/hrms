@@ -3,7 +3,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   Search,
-  Loader2,
   Plus,
   SlidersHorizontal,
   Printer,
@@ -379,17 +378,13 @@ export function SalaryStructureView() {
   const [structures, setStructures] = useState<SalaryStructure[]>([])
   const [employees, setEmployees] = useState<EmployeeItem[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAssigning, setIsAssigning] = useState(false);
   const loadStructures = async () => {
     try {
       const [rows, empRows] = await Promise.all([hrSalaryStructureService.list(), hrEmployeeService.list()]);
-      const mappedEmps = empRows.map(mapEmployeeFromApi);
-      setEmployees(mappedEmps);
-      const empLookup = new Map(mappedEmps.map((e) => [e.id, e]));
-      setStructures(rows.map((r) => mapSalaryStructureFromApi(r, empLookup)));
+      setEmployees(empRows.map(mapEmployeeFromApi));
+      setStructures(rows.map(mapSalaryStructureFromApi));
     } catch (e) {
-      console.warn(e);
+      setToastMessage(e instanceof Error ? e.message : "Failed to load salary structures");
       setStructures([]);
       setEmployees([]);
     }
@@ -594,8 +589,6 @@ export function SalaryStructureView() {
 
   const handleSaveStructure = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return;
-
     if (!formName.trim()) {
       setToastMessage("Please enter a structure name.");
       return;
@@ -606,42 +599,41 @@ export function SalaryStructureView() {
       return;
     }
 
-    setIsSubmitting(true);
+    const { computedEarnings, computedDeductions, gross, totalDed, net } = calculateLiveTotals(
+      formEarnings,
+      formDeductions,
+    );
+
+    const existing = editingStructureId
+      ? structures.find((s) => s.id === editingStructureId)
+      : undefined;
+    const todayIso = new Date().toISOString().slice(0, 10);
+
+    const payload = mapSalaryStructureToApi({
+      name: formName.trim(),
+      department: formDept,
+      employmentType: formEmpType,
+      structureType: existing?.structureType ?? "Grade-Based",
+      version: existing?.version ?? 1,
+      isCurrentVersion: existing?.isCurrentVersion ?? true,
+      effectiveFrom: existing?.effectiveFrom ?? todayIso,
+      effectiveTo: existing?.effectiveTo,
+      description: formDesc,
+      status: existing?.status ?? "Active",
+      overtimeEligible: existing?.overtimeEligible ?? true,
+      incentives: existing?.incentives ?? 0,
+      earnings: computedEarnings,
+      deductions: computedDeductions,
+      grossSalary: gross,
+      totalDeductions: totalDed,
+      netSalary: net,
+      assignedEmployees: existing?.assignedEmployees ?? [],
+      createdBy: existing?.createdBy ?? "HR Admin",
+      createdDate: existing?.createdDate ?? todayIso,
+      lastUpdated: todayIso,
+    });
+
     try {
-      const { computedEarnings, computedDeductions, gross, totalDed, net } = calculateLiveTotals(
-        formEarnings,
-        formDeductions,
-      );
-
-      const existing = editingStructureId
-        ? structures.find((s) => s.id === editingStructureId)
-        : undefined;
-      const todayIso = new Date().toISOString().slice(0, 10);
-
-      const payload = mapSalaryStructureToApi({
-        name: formName.trim(),
-        department: formDept,
-        employmentType: formEmpType,
-        structureType: existing?.structureType ?? "Grade-Based",
-        version: existing?.version ?? 1,
-        isCurrentVersion: existing?.isCurrentVersion ?? true,
-        effectiveFrom: existing?.effectiveFrom ?? todayIso,
-        effectiveTo: existing?.effectiveTo,
-        description: formDesc,
-        status: existing?.status ?? "Active",
-        overtimeEligible: existing?.overtimeEligible ?? true,
-        incentives: existing?.incentives ?? 0,
-        earnings: computedEarnings,
-        deductions: computedDeductions,
-        grossSalary: gross,
-        totalDeductions: totalDed,
-        netSalary: net,
-        assignedEmployees: existing?.assignedEmployees ?? [],
-        createdBy: existing?.createdBy ?? "HR Admin",
-        createdDate: existing?.createdDate ?? todayIso,
-        lastUpdated: todayIso,
-      });
-
       if (editingStructureId) {
         await hrSalaryStructureService.update(editingStructureId, payload);
         setToastMessage(`Salary structure "${formName}" updated successfully.`);
@@ -653,8 +645,6 @@ export function SalaryStructureView() {
       setIsCreateModalOpen(false);
     } catch (err) {
       setToastMessage(err instanceof Error ? err.message : "Failed to save salary structure");
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -673,7 +663,7 @@ export function SalaryStructureView() {
   // Save Assign Form
   const handleSaveAssign = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!assigningStructure || isAssigning) return;
+    if (!assigningStructure) return;
 
     const idsToAssign = new Set<string>();
 
@@ -692,11 +682,15 @@ export function SalaryStructureView() {
       return;
     }
 
-    setIsAssigning(true);
     try {
-      const existingAssigned = assigningStructure.assignedEmployees || [];
+      await Promise.all(
+        [...idsToAssign].map((empId) =>
+          hrEmployeeService.update(empId, { salaryStructureId: assigningStructure.id }),
+        ),
+      );
+
       const mergedIds = [
-        ...new Set([...existingAssigned.map((a) => a.id), ...idsToAssign]),
+        ...new Set([...assigningStructure.assignedEmployees.map((a) => a.id), ...idsToAssign]),
       ];
       const mergedEmployees = mergedIds
         .map((id) => employees.find((emp) => emp.id === id))
@@ -717,16 +711,19 @@ export function SalaryStructureView() {
         }),
       );
 
-      await loadStructures();
+      const [structureRows, empRows] = await Promise.all([
+        hrSalaryStructureService.list(),
+        hrEmployeeService.list(),
+      ]);
+      setStructures(structureRows.map(mapSalaryStructureFromApi));
+      setEmployees(empRows.map(mapEmployeeFromApi));
 
       setIsAssignModalOpen(false);
       setToastMessage(
-        `Assigned "${assigningStructure.name}" to ${idsToAssign.size} employee(s) successfully.`,
+        `Assigned "${assigningStructure.name}" to ${idsToAssign.size} employee(s).`,
       );
     } catch (err) {
       setToastMessage(err instanceof Error ? err.message : "Failed to assign salary structure");
-    } finally {
-      setIsAssigning(false);
     }
   };
 
@@ -897,38 +894,32 @@ export function SalaryStructureView() {
         />
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-        {/* Table Toolbar & Filters */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3.5 bg-slate-50/40">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center justify-center rounded-full bg-emerald-50 border border-emerald-200/80 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-              {filteredStructures.length}
-            </span>
-            <span className="text-xs font-semibold text-slate-700">
-              Salary Structure{filteredStructures.length !== 1 ? "s" : ""}
-            </span>
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
+          <p className="text-xs font-semibold text-slate-700">
+            {filteredStructures.length} structure{filteredStructures.length !== 1 ? "s" : ""}
             {filteredStructures.length !== structures.length && (
-              <span className="text-xs text-slate-400 font-medium">
-                (filtered from {structures.length})
-              </span>
+              <span className="text-slate-500"> · filtered from {structures.length}</span>
             )}
-          </div>
+          </p>
+        </div>
 
+        <div className="border-b border-slate-100 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[240px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <div className="relative min-w-[200px] flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by name, department, or grade..."
+                placeholder="Search by name or department..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="h-9 w-full rounded-xl border border-slate-200 bg-white py-1.5 pl-9 pr-8 text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-2 pl-9 pr-4 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
               {searchTerm && (
                 <button
                   type="button"
                   onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -939,9 +930,9 @@ export function SalaryStructureView() {
               <select
                 value={selectedDept}
                 onChange={(e) => setSelectedDept(e.target.value)}
-                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:outline-none transition-all cursor-pointer"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
               >
-                <option value="ALL">All Departments</option>
+                <option value="ALL">All departments</option>
                 {departmentOptions.map((dept) => (
                   <option key={dept} value={dept}>{dept}</option>
                 ))}
@@ -950,9 +941,9 @@ export function SalaryStructureView() {
               <select
                 value={selectedEmpType}
                 onChange={(e) => setSelectedEmpType(e.target.value)}
-                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:outline-none transition-all cursor-pointer"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
               >
-                <option value="ALL">All Employment Types</option>
+                <option value="ALL">All employment types</option>
                 <option value="Permanent">Permanent</option>
                 <option value="Contract">Contract</option>
                 <option value="Probation">Probation</option>
@@ -962,29 +953,26 @@ export function SalaryStructureView() {
               <select
                 value={selectedStatus}
                 onChange={(e) => setSelectedStatus(e.target.value)}
-                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:outline-none transition-all cursor-pointer"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800"
               >
-                <option value="ALL">All Statuses</option>
+                <option value="ALL">All statuses</option>
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
               </select>
 
-              {(searchTerm || selectedDept !== "ALL" || selectedEmpType !== "ALL" || selectedStatus !== "ALL") && (
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="h-9 inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-all cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                  Reset
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
+              >
+                Reset
+              </button>
             </div>
 
             <button
               type="button"
               onClick={() => setIsMobileFilterOpen(true)}
-              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 h-9 text-xs font-bold text-slate-700 sm:hidden"
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold sm:hidden"
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
               Filters
@@ -992,35 +980,33 @@ export function SalaryStructureView() {
           </div>
         </div>
 
-        {/* Desktop Table View */}
-        <div className="hidden sm:block overflow-x-auto">
+        <div className="hidden sm:block">
           <table className="w-full table-fixed text-left text-xs text-slate-700">
-            <thead className="border-b border-slate-200/90 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="w-[26%] px-5 py-3.5">Structure Details</th>
-                <th className="w-[16%] px-4 py-3.5">Department</th>
-                <th className="w-[14%] px-4 py-3.5">Components</th>
-                <th className="w-[15%] px-4 py-3.5">Gross / Net Pay</th>
-                <th className="w-[10%] px-4 py-3.5 text-center">Assigned</th>
-                <th className="w-[9%] px-4 py-3.5 text-center">Status</th>
-                <th className="w-[16%] px-5 py-3.5 text-right">Actions</th>
+                <th className="w-[28%] px-4 py-3">Structure</th>
+                <th className="w-[16%] px-4 py-3">Department</th>
+                <th className="w-[14%] px-4 py-3">Components</th>
+                <th className="w-[14%] px-4 py-3">Gross / Net</th>
+                <th className="w-[12%] px-4 py-3">Assigned</th>
+                <th className="w-[10%] px-4 py-3">Status</th>
+                <th className="w-[6%] px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 bg-white">
+            <tbody className="divide-y divide-slate-100">
               {filteredStructures.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-16">
+                  <td colSpan={7} className="py-14">
                     <EmptyState
                       title={structures.length === 0 ? "No salary structures yet" : "No matching structures"}
                       description={
                         structures.length === 0
                           ? "Create your first salary template to use it when adding employees and running payroll."
-                          : "Try adjusting your search query or dropdown filters."
+                          : "Try adjusting your search or filters."
                       }
                       action={
                         structures.length === 0 ? (
                           <Button type="button" size="sm" onClick={() => handleOpenCreateModal()}>
-                            <Plus className="h-3.5 w-3.5 mr-1.5" />
                             Create Structure
                           </Button>
                         ) : (
@@ -1033,101 +1019,96 @@ export function SalaryStructureView() {
                   </td>
                 </tr>
               ) : (
-                filteredStructures.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="group cursor-pointer transition-colors hover:bg-slate-50/80"
-                    onClick={() => setViewingStructure(s)}
-                  >
-                    <td className="px-5 py-3.5 align-middle">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <p className="truncate font-semibold text-slate-900 text-xs group-hover:text-emerald-700 transition-colors">
-                          {s.name}
-                        </p>
-                        <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 border border-slate-200/60">
-                          v{s.version}
-                        </span>
-                      </div>
-                      <p className="mt-1 truncate text-[11px] text-slate-500 font-medium">
-                        {s.employmentType} · Updated {s.lastUpdated}
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-3.5 align-middle">
-                      <p className="font-semibold text-slate-800">{s.department}</p>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">{s.structureType}</p>
-                    </td>
-
-                    <td className="px-4 py-3.5 align-middle">
-                      <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        <span>{s.earnings.length} earning{s.earnings.length !== 1 ? "s" : ""}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium mt-0.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                        <span>{s.deductions.length} deduction{s.deductions.length !== 1 ? "s" : ""}</span>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3.5 align-middle">
-                      <p className="font-bold tabular-nums text-slate-900 text-xs">
-                        ₹{s.grossSalary.toLocaleString("en-IN")}
-                      </p>
-                      <span className="inline-block mt-0.5 rounded-md bg-emerald-50 border border-emerald-100/80 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-emerald-800">
-                        Net ₹{s.netSalary.toLocaleString("en-IN")}
+              filteredStructures.map((s) => (
+                <tr
+                  key={s.id}
+                  className="cursor-pointer transition hover:bg-slate-50/80"
+                  onClick={() => setViewingStructure(s)}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className="truncate font-semibold text-slate-900">{s.name}</p>
+                      <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+                        v{s.version}
                       </span>
-                    </td>
+                    </div>
+                    <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                      {s.employmentType} · Updated {s.lastUpdated}
+                    </p>
+                  </td>
 
-                    <td className="px-4 py-3.5 align-middle text-center">
-                      <span className="inline-flex items-center justify-center gap-1.5 rounded-full bg-blue-50/80 border border-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 shadow-2xs">
-                        <Users className="h-3.5 w-3.5" />
-                        <span>{s.assignedEmployees.length}</span>
-                      </span>
-                    </td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">{s.department}</p>
+                    <p className="text-[10px] text-slate-500">{s.structureType}</p>
+                  </td>
 
-                    <td className="px-4 py-3.5 align-middle text-center">
-                      <StatusBadge status={s.status} />
-                    </td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800">
+                      {s.earnings.length} earning{s.earnings.length !== 1 ? "s" : ""}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      {s.deductions.length} deduction{s.deductions.length !== 1 ? "s" : ""}
+                    </p>
+                  </td>
 
-                    <td className="px-5 py-3.5 align-middle text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          title="View Details"
-                          onClick={() => setViewingStructure(s)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 shadow-2xs cursor-pointer"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Edit Structure"
-                          onClick={() => handleOpenCreateModal(s)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50/50 text-emerald-700 transition-all hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-900 shadow-2xs cursor-pointer"
-                        >
-                          <Edit className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Assign to Staff"
-                          onClick={() => handleOpenAssignModal(s)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50/50 text-blue-700 transition-all hover:border-blue-300 hover:bg-blue-100 hover:text-blue-900 shadow-2xs cursor-pointer"
-                        >
-                          <UserPlus className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          title="Delete Structure"
-                          onClick={() => handleDeleteStructure(s.id, s.name)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50/50 text-rose-600 transition-all hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 shadow-2xs cursor-pointer"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                  <td className="px-4 py-3">
+                    <p className="font-bold tabular-nums text-slate-900">
+                      ₹{s.grossSalary.toLocaleString("en-IN")}
+                    </p>
+                    <p className="text-[10px] font-semibold tabular-nums text-emerald-700">
+                      Net ₹{s.netSalary.toLocaleString("en-IN")}
+                    </p>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-800">
+                      <Users className="h-3 w-3" />
+                      {s.assignedEmployees.length}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <StatusBadge status={s.status} />
+                  </td>
+
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <button
+                        type="button"
+                        title="View"
+                        onClick={() => setViewingStructure(s)}
+                        className="rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Edit"
+                        onClick={() => handleOpenCreateModal(s)}
+                        className="rounded-lg p-1.5 text-emerald-700 transition hover:bg-emerald-50"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Assign"
+                        onClick={() => handleOpenAssignModal(s)}
+                        className="rounded-lg p-1.5 text-blue-700 transition hover:bg-blue-50"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        onClick={() => handleDeleteStructure(s.id, s.name)}
+                        className="rounded-lg p-1.5 text-rose-600 transition hover:bg-rose-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )))}
             </tbody>
           </table>
         </div>

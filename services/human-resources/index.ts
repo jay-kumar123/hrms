@@ -171,7 +171,6 @@ export const hrSalaryStructureService = crud<Record<string, unknown>>("/salary-s
 export const hrPayslipService = crud<Record<string, unknown>>("/payslips");
 export const hrComplaintCategoryService = crud<Record<string, unknown>>("/complaint-categories");
 export const hrComplaintService = crud<Record<string, unknown>>("/complaints");
-export const hrTaxRuleService = crud<Record<string, unknown>>("/tax/rules");
 
 export const hrPayrollSettingsService = {
   list: () => api.get<Record<string, unknown>[]>(hrPath("/payroll/settings")),
