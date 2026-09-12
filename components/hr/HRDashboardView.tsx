@@ -238,15 +238,35 @@ export function HRDashboardView() {
     [kpiSummary, grievanceSummary],
   );
 
-  const departmentChartData = useMemo(
-    () =>
-      departmentHeadcounts.map((dept) => ({
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const chartWeeklyTrend = useMemo(() => {
+    if (weeklyTrend && weeklyTrend.length > 0) return weeklyTrend;
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    return days.map((day) => ({
+      day,
+      present: kpiSummary.presentCount || 0,
+    }));
+  }, [weeklyTrend, kpiSummary.presentCount]);
+
+  const departmentChartData = useMemo(() => {
+    if (departmentHeadcounts && departmentHeadcounts.length > 0) {
+      return departmentHeadcounts.map((dept) => ({
         name: dept.department,
         count: dept.count,
-        fill: dept.color || (departmentChartColors[dept.department] ?? "#64748b"),
-      })),
-    [departmentHeadcounts],
-  );
+        fill: dept.color || (departmentChartColors[dept.department] ?? "#16a34a"),
+      }));
+    }
+    return [
+      { name: "Front Office", count: 0, fill: "#2563eb" },
+      { name: "Housekeeping", count: 0, fill: "#16a34a" },
+      { name: "Food & Beverage", count: 0, fill: "#ea580c" },
+      { name: "Human Resources", count: 0, fill: "#8b5cf6" },
+    ];
+  }, [departmentHeadcounts]);
 
   const filteredDesignations = useMemo(
     () =>
@@ -329,35 +349,39 @@ export function HRDashboardView() {
                 <MetricTile label="Late arrivals" value={attendanceBreakdown.lateArrivals} detail="Within grace" />
               </div>
 
-              <div className="mt-4 h-44 sm:h-48">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={weeklyTrend} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="hrAttendanceFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#16a34a" stopOpacity={0.18} />
-                        <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                    <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} width={28} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="present"
-                      stroke="#16a34a"
-                      strokeWidth={2}
-                      fill="url(#hrAttendanceFill)"
-                      dot={{ fill: "#16a34a", r: 2.5 }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="mt-4 h-44 sm:h-48 min-h-[176px] w-full min-w-0">
+                {mounted ? (
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={160}>
+                    <AreaChart data={chartWeeklyTrend} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="hrAttendanceFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#16a34a" stopOpacity={0.18} />
+                          <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                      <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} width={28} />
+                      <Tooltip
+                        contentStyle={{
+                          borderRadius: "8px",
+                          border: "1px solid #e2e8f0",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="present"
+                        stroke="#16a34a"
+                        strokeWidth={2}
+                        fill="url(#hrAttendanceFill)"
+                        dot={{ fill: "#16a34a", r: 2.5 }}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full w-full rounded-xl bg-slate-50 animate-pulse" />
+                )}
               </div>
 
               <div className="mt-4 space-y-1.5">
@@ -393,34 +417,38 @@ export function HRDashboardView() {
 
           <div className="min-w-0 lg:col-span-5">
             <PanelCard title="Department headcount" subtitle="Staff allocation by department">
-              <div className="h-52 sm:h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={departmentChartData} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                    <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: "#64748b", fontSize: 11 }}
-                      width={92}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "#f8fafc" }}
-                      contentStyle={{
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        fontSize: "12px",
-                      }}
-                    />
-                    <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={14}>
-                      {departmentChartData.map((entry) => (
-                        <Cell key={entry.name} fill={entry.fill} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="h-52 sm:h-56 min-h-[208px] w-full min-w-0">
+                {mounted ? (
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={200}>
+                    <BarChart data={departmentChartData} layout="vertical" margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                      <XAxis type="number" axisLine={false} tickLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: "#64748b", fontSize: 11 }}
+                        width={92}
+                      />
+                      <Tooltip
+                        cursor={{ fill: "#f8fafc" }}
+                        contentStyle={{
+                          borderRadius: "8px",
+                          border: "1px solid #e2e8f0",
+                          fontSize: "12px",
+                        }}
+                      />
+                      <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={14}>
+                        {departmentChartData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full w-full rounded-xl bg-slate-50 animate-pulse" />
+                )}
               </div>
             </PanelCard>
           </div>
