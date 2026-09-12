@@ -47,10 +47,10 @@ async function loadLookups(force = false): Promise<LookupCaches> {
   }
 
   const [depts, desigs, empTypes, shifts] = await Promise.all([
-    hrModel.list<Dept>(hrTables.departments).catch(() => []),
-    hrModel.list<Desig>(hrTables.designations).catch(() => []),
-    hrModel.list<EmpType>(hrTables.employmentTypes).catch(() => []),
-    hrModel.list<Shift>(hrTables.shiftTypes).catch(() => []),
+    hrModel.list<Dept>(hrTables.departments),
+    hrModel.list<Desig>(hrTables.designations),
+    hrModel.list<EmpType>(hrTables.employmentTypes),
+    hrModel.list<Shift>(hrTables.shiftTypes),
   ]);
 
   const caches: LookupCaches = {
@@ -119,18 +119,13 @@ export async function enrichEmployee(emp: Employee) {
     shiftType = resolve(emp.shiftTypeId, caches.shiftTypes);
   }
 
-  const deptFallback = String(emp.department || "");
-  const desigFallback = String(emp.designation || "");
-  const empTypeFallback = String(emp.employmentType || (emp as any).employment_type || "");
-
   return {
     ...emp,
-    empCode: String(emp.empCode || (emp as any).employeeCode || (emp as any).employee_code || emp.id || ""),
-    name: `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || String((emp as any).name || "Employee"),
-    department: department || (deptFallback.startsWith("a100") ? resolve(deptFallback, caches.departments) || deptFallback : deptFallback) || "General",
-    designation: designation || (desigFallback.startsWith("b200") ? resolve(desigFallback, caches.designations) || desigFallback : desigFallback) || "Staff",
-    employmentType: employmentType || (empTypeFallback.startsWith("c300") ? resolve(empTypeFallback, caches.employmentTypes) || empTypeFallback : empTypeFallback) || "Full Time",
-    shiftType: shiftType || "Morning Shift",
+    name: `${emp.firstName} ${emp.lastName}`.trim(),
+    department,
+    designation,
+    employmentType,
+    shiftType,
   };
 }
 

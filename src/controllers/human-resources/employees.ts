@@ -7,12 +7,7 @@ import { fail, fromError, ok } from "../../utils/response.js";
 
 export async function listEmployees(_req: ContextRequest, res: Response) {
   try {
-    let rows: any[] = [];
-    try {
-      rows = await hrModel.list(hrTables.employees, { orderBy: "created_at", ascending: false });
-    } catch {
-      rows = await hrModel.list(hrTables.employees);
-    }
+    const rows = await hrModel.list(hrTables.employees, { orderBy: "emp_code" });
     return ok(res, await enrichEmployees(rows as Parameters<typeof enrichEmployees>[0]));
   } catch (e) {
     return fromError(res, e);
