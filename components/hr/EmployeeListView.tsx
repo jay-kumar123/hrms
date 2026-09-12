@@ -297,10 +297,6 @@ export function EmployeeListView() {
         return false;
       }
 
-      if (!matchesEmployeeQuickFilter(emp, activeQuickFilter)) {
-        return false;
-      }
-
       return true;
     });
   }, [
