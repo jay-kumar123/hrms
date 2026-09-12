@@ -509,59 +509,67 @@ export function HRDashboardView() {
           </div>
 
           <div className="min-w-0 lg:col-span-5">
-            <PanelCard
-              title="Gender distribution"
-              subtitle="Active workforce diversity breakdown"
-              action={
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                  {genderDistribution.total || 1} total
-                </span>
-              }
-            >
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-[11px] font-medium text-slate-500">
-                    <span>Gender ratio</span>
-                    <span>
-                      {Math.round((genderDistribution.male / genderDistribution.total || 1) * 100)}% male ·{" "}
-                      {Math.round((genderDistribution.female / genderDistribution.total || 1) * 100)}% female
-                    </span>
-                  </div>
-                  <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="bg-slate-700"
-                      style={{ width: `${(genderDistribution.male / genderDistribution.total || 1) * 100}%` }}
-                    />
-                    <div
-                      className="bg-slate-400"
-                      style={{ width: `${(genderDistribution.female / genderDistribution.total || 1) * 100}%` }}
-                    />
-                    <div
-                      className="bg-slate-300"
-                      style={{ width: `${(genderDistribution.other / genderDistribution.total || 1) * 100}%` }}
-                    />
-                  </div>
-                </div>
+            {(() => {
+              const genderTotal = genderDistribution.total || 0;
+              const malePct = genderTotal > 0 ? Math.round((genderDistribution.male / genderTotal) * 100) : 0;
+              const femalePct = genderTotal > 0 ? Math.round((genderDistribution.female / genderTotal) * 100) : 0;
+              const otherPct = genderTotal > 0 ? Math.round((genderDistribution.other / genderTotal) * 100) : 0;
 
-                <div className="grid grid-cols-3 gap-2.5">
-                  <MetricTile
-                    label="Male"
-                    value={genderDistribution.male}
-                    detail={`${Math.round((genderDistribution.male / genderDistribution.total || 1) * 100)}%`}
-                  />
-                  <MetricTile
-                    label="Female"
-                    value={genderDistribution.female}
-                    detail={`${Math.round((genderDistribution.female / genderDistribution.total || 1) * 100)}%`}
-                  />
-                  <MetricTile
-                    label="Other"
-                    value={genderDistribution.other}
-                    detail={`${Math.round((genderDistribution.other / genderDistribution.total || 1) * 100)}%`}
-                  />
-                </div>
-              </div>
-            </PanelCard>
+              return (
+                <PanelCard
+                  title="Gender distribution"
+                  subtitle="Active workforce diversity breakdown"
+                  action={
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                      {genderTotal} total
+                    </span>
+                  }
+                >
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-[11px] font-medium text-slate-500">
+                        <span>Gender ratio</span>
+                        <span>
+                          {malePct}% male · {femalePct}% female{otherPct > 0 ? ` · ${otherPct}% other` : ""}
+                        </span>
+                      </div>
+                      <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className="bg-slate-700"
+                          style={{ width: `${genderTotal > 0 ? (genderDistribution.male / genderTotal) * 100 : 0}%` }}
+                        />
+                        <div
+                          className="bg-slate-400"
+                          style={{ width: `${genderTotal > 0 ? (genderDistribution.female / genderTotal) * 100 : 0}%` }}
+                        />
+                        <div
+                          className="bg-slate-300"
+                          style={{ width: `${genderTotal > 0 ? (genderDistribution.other / genderTotal) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <MetricTile
+                        label="Male"
+                        value={genderDistribution.male}
+                        detail={`${malePct}%`}
+                      />
+                      <MetricTile
+                        label="Female"
+                        value={genderDistribution.female}
+                        detail={`${femalePct}%`}
+                      />
+                      <MetricTile
+                        label="Other"
+                        value={genderDistribution.other}
+                        detail={`${otherPct}%`}
+                      />
+                    </div>
+                  </div>
+                </PanelCard>
+              );
+            })()}
           </div>
         </div>
 
